@@ -35,12 +35,28 @@ interface Slots {
 
 const the = (s: string): string => (/^(the|my|our|your|a|an) /.test(s) ? s : `the ${s}`);
 
+/**
+ * The digital artifact the task lives in — resolved WITHOUT invention:
+ * 1. the tool the user named ("the inbox")
+ * 2. for communication/writing tasks, the object ITSELF ("John's email")
+ * 3. a generic grounded phrase only when the medium is genuinely digital
+ * Physical tasks never receive an artifact — that would be fabrication.
+ */
+export function artifactFor(a: TaskAnalysis): string | null {
+  if (a.tool) return the(a.tool);
+  if (["communication", "writing"].includes(a.structure) && (a.medium === "digital" || a.medium === "mixed")) {
+    return a.object;
+  }
+  if (a.medium === "digital") return "the app or file for it";
+  if (a.medium === "unknown" && a.needsApp) return "the app it lives in";
+  return null;
+}
+
 function slotsFor(a: TaskAnalysis): Slots {
-  const digitalish = a.medium === "digital" || a.medium === "mixed";
   const physicalish = a.medium === "physical" || a.medium === "mixed";
   return {
     o: a.object,
-    t: a.tool ? the(a.tool) : digitalish ? "the app or file for it" : a.object,
+    t: artifactFor(a) ?? a.object,
     p: a.place ? the(a.place) : physicalish ? "the spot it starts at" : "your usual spot",
     v: a.verbPhrase ?? "the first bit",
     who: a.person ? the(a.person).replace(/^the /, "your ") : null,
@@ -93,18 +109,20 @@ export const STRATEGIES: StrategyDef[] = [
       /* bodily approaches — require a real location or a physical task */
       { fits: locationOk, render: (s) => `Stand up and walk to ${s.p}. Nothing else.` },
       { fits: locationOk, render: (s) => `Clear a hand-sized space at ${s.p} — that's the whole move.` },
-      { fits: locationOk, render: (s) => `Sit down at ${s.p} and place your hands where the work happens.` },
-      { fits: locationOk, render: (s) => `Get a glass of water, stand at ${s.p}, and face the mess.` },
+      { fits: locationOk, render: (s) => `Sit down at ${s.p} and face ${s.o}.` },
       /* bodily approaches for screen work — body + named digital artifact */
       { fits: isDigital, render: (s) => `Sit down, open ${s.t}, and put your hands where the typing happens.` },
       { fits: isDigital, render: (s) => `Close every tab except ${s.t}. Then just look at it.` },
       { fits: isDigital, render: (s) => `Put your phone in another room, then open ${s.t}.` },
-      /* no evidence either way — offer options, fabricate nothing */
+      /* no evidence either way — anchored to the task, fabricate nothing */
       {
         fits: (a) => a.medium === "unknown",
         render: (s) => `Stand up and move to where ${s.o} lives — desk, room, or app.`,
       },
-      { fits: (a) => a.medium === "unknown", render: () => `Stand up, stretch once, and face the thing.` },
+      {
+        fits: (a) => a.medium === "unknown",
+        render: (s) => `Stand up, take one breath, and get within arm's reach of ${s.o}.`,
+      },
     ],
   },
   {
@@ -140,7 +158,6 @@ export const STRATEGIES: StrategyDef[] = [
     templates: [
       { render: (s) => `Do the 30-second version of ${s.o}. Stop when the half-minute is up.` },
       { render: (s) => `One single unit of ${s.o} — one line, one item, one click. That's the whole task.` },
-      { fits: (a) => artifactOk(a) || isPhysical(a), render: (s) => `Touch ${s.t} for exactly 15 seconds. Then you're free.` },
       { render: (s) => `Do ${s.v} for one breath's worth. Then stop and look.` },
       { render: (s) => `The tiniest real slice of ${s.o} — smaller than feels useful. That's the point.` },
     ],
@@ -192,11 +209,11 @@ export const STRATEGIES: StrategyDef[] = [
         render: (s) =>
           s.who
             ? `Send ${s.who} one line: “doing ${s.o.replace(/^the /, "")} now.” That's it.`
-            : `Say out loud, to the room: “I'm doing the first bit now.”`,
+            : `Say out loud, to the room: “I'm starting ${s.o} now.”`,
       },
-      { render: () => `Tell me the very first move — say it out loud — then do only that.` },
+      { render: (s) => `Say ${s.o} out loud, name its very first move, then do only that.` },
       { render: (s) => `Text any friend: “starting ${s.o.replace(/^the /, "")}, 5 minutes.” No reply needed.` },
-      { render: () => `Put on a “body double” — a video of someone working — and mirror them for 2 minutes.` },
+      { render: (s) => `Put on a body-double video and start ${s.o} beside it for 2 minutes.` },
     ],
   },
   {
@@ -334,14 +351,23 @@ function scopeRung(a: TaskAnalysis): string {
 export function decompose(a: TaskAnalysis, size: Level): string {
   const o = short(a.object);
   const unit = UNIT[a.structure];
-  const t = a.tool ? the(a.tool) : "the app or file for it";
+  const t = artifactFor(a) ?? "the app or file for it";
   const p = a.place ? the(a.place) : null;
+
+  /* Communication gets its own faithful chain: open → read → one sentence → reply */
+  const communication: Record<Level, string> = {
+    0: scopeRung(a),
+    1: `Open ${t} and read what's already there. Nothing more.`,
+    2: `Write the first sentence of your reply — stop there.`,
+    3: `Open ${t} and click Reply. You don't have to type yet.`,
+    4: `Open ${t}. That's the whole step — closing after is allowed.`,
+  };
 
   const digital: Record<Level, string> = {
     0: scopeRung(a),
     1: `Open ${t} and read what's already there. Change nothing.`,
     2: `Handle ${unit}: ${a.object}. Stop right after.`,
-    3: ["writing", "communication"].includes(a.structure)
+    3: a.structure === "writing"
       ? `Put your cursor in ${t} and let it blink for 15 seconds.`
       : `Open ${t} and scroll one screen. Nothing else.`,
     4: `Open ${t}. That's the whole step — closing after is allowed.`,
@@ -371,5 +397,8 @@ export function decompose(a: TaskAnalysis, size: Level): string {
   };
 
   const table: Record<Medium, Record<Level, string>> = { digital, physical, mixed, unknown };
+  if (a.structure === "communication" && (a.medium === "digital" || a.medium === "mixed" || a.medium === "unknown")) {
+    return communication[size];
+  }
   return table[a.medium][size];
 }

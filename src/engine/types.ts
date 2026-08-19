@@ -99,6 +99,25 @@ export type ThemeId = "pine" | "dawn" | "rain";
 /** How sure the profile is about its own conclusions. */
 export type ConfidenceTier = "none" | "low" | "emerging" | "stable";
 
+/* ---------------- analysis confidence & versions ---------------- */
+
+/**
+ * Deterministic confidence (0..1) for each inference the analysis
+ * makes. Low confidence means "treat as a weak prior", never as fact.
+ */
+export interface AnalysisConfidence {
+  structure: number;
+  medium: number;
+  verb: number;
+  object: number;
+  barrier: number;
+}
+
+/** Bump when analysis rules change meaningfully (recorded in traces). */
+export const ANALYSIS_VERSION = "3.0.0";
+/** Bump when the ranking/scoring policy changes (recorded in traces). */
+export const POLICY_VERSION = "heur-1.0.0";
+
 /* ---------------- task understanding ---------------- */
 
 export interface TaskAnalysis {
@@ -142,6 +161,14 @@ export interface TaskAnalysis {
   avoidanceTriggers: number;
   /** The scope word that made it big ("entire", "all"…), if any. */
   scopeWord: string | null;
+  /** 0..3 — how broad the scope is (0 bounded … 3 whole-domain). */
+  scopeStrength: number;
+  /** Per-inference confidence values (0..1). */
+  analysisConfidence: AnalysisConfidence;
+  /** Detected script/locale hint ("en", "ar", …). */
+  locale: string;
+  /** Analysis rules version that produced this object. */
+  analysisVersion: string;
 }
 
 /* ---------------- capacity ---------------- */
@@ -184,7 +211,73 @@ export interface CandidateAction {
   strategy: StrategyId;
   size: Level;
   costs: CostVector;
-  source: "template" | "decompose" | "fallback";
+  /** "remote" candidates are AI-provided; they earn nothing — they must
+   *  pass the exact same local validation as everything else. */
+  source: "template" | "decompose" | "fallback" | "remote";
+}
+
+/* ---------------- decision trace (internal, privacy-safe) ---------------- */
+
+export interface CandidateTrace {
+  action: string;
+  strategy: StrategyId;
+  size: Level;
+  score: number;
+  valid: boolean;
+  source: CandidateAction["source"];
+}
+
+export interface DecisionTrace {
+  policyVersion: string;
+  analysisVersion: string;
+  candidates: CandidateTrace[];
+  chosenIndex: number;
+  /**
+   * The engine is deterministic: the top valid candidate is always
+   * chosen. Never fabricate stochastic-looking numbers.
+   */
+  selectionProbability: 1;
+  createdAt: number;
+}
+
+/* ---------------- ranker architecture ---------------- */
+
+export interface RankingContext {
+  analysis: TaskAnalysis;
+  barrier: Barrier | null;
+  size: Level;
+  memory: EngineMemory;
+  profile: Profile | null;
+  salt: number;
+  capacityEnergy?: number | null;
+  avoidStrategy?: StrategyId | null;
+}
+
+export interface RankedCandidate {
+  candidate: CandidateAction;
+  score: number;
+}
+
+/**
+ * Ranking is separable from generation/validation by design.
+ * HeuristicRanker is the shipped baseline; LearnedRanker exists only
+ * as a future contract — there is deliberately no online learning yet.
+ */
+export interface CandidateRanker {
+  id: string;
+  rank(context: RankingContext, candidates: CandidateAction[]): RankedCandidate[];
+}
+
+/**
+ * Future policy abstraction (contextual bandit). Exploration is
+ * disabled by default and may only ever explore locally-valid
+ * candidates. Do not enable without explicit opt-in.
+ */
+export interface PolicySelector {
+  select(
+    context: RankingContext,
+    candidates: CandidateAction[],
+  ): { chosen: CandidateAction; probability: number; policyVersion: string };
 }
 
 /** Concise, non-private decision metadata (safe for UI exposure). */
@@ -334,6 +427,12 @@ export interface Settings {
   doubleMsgs: boolean;
   saveTitles: boolean;
   aiEndpoint: string;
+  /**
+   * Local profile learning from your own sessions. On by default
+   * (baseline behavior); can be disabled completely — the engine then
+   * treats every session as a fresh start. Never sent anywhere.
+   */
+  learningEnabled: boolean;
 }
 
 export type Screen =

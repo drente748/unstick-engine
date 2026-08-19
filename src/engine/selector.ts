@@ -1,4 +1,6 @@
-import { clampLevel, hashStr, intentKey, normalizeAction } from "./analysis";
+import { clampLevel, hashStr, intentKey, normalizeAction, tokenize } from "./analysis";
+import { recordDecision } from "./decisionLog";
+import { ANALYSIS_VERSION, POLICY_VERSION } from "./types";
 import {
   BARRIER_STRATEGIES,
   STRATEGIES,
@@ -11,14 +13,19 @@ import {
 import type {
   Barrier,
   CandidateAction,
+  CandidateRanker,
+  CandidateTrace,
   CostVector,
   Decision,
+  DecisionTrace,
   Draft,
   EngineMemory,
   FeedbackKind,
   Level,
   PreviewStep,
   Profile,
+  RankedCandidate,
+  RankingContext,
   Rate,
   StrategyId,
   TaskAnalysis,
@@ -117,6 +124,94 @@ export function wasShown(mem: EngineMemory, action: string): boolean {
   return mem.shown.includes(normalizeAction(action)) || mem.shownIntents.includes(intentKey(action));
 }
 
+/* ---------------- the centralized candidate validator ----------------
+   ONE validator, used by every emission path: templates, decompose,
+   fallbacks, recovery, rescue, previewSteps, and remote/AI candidates.
+   There is no alternate validation route.
+   ------------------------------------------------------------------ */
+
+const VAGUE_OPENERS = ["just start", "break it into", "be more productive", "focus on your goals", "try harder", "do something", "take action", "get ready", "be more disciplined"];
+const JUDGMENTAL = ["lazy", "procrastinat", "you should have", "stop being", "discipline", "stopping"];
+/** Fabricated-context markers — no template may ever produce these. */
+const FABRICATED_MARKERS = ["where it happens", "spot where", "where the work", "where the typing", "face the mess"];
+/** Body-prep phrases with no task content — only justified for movement tasks. */
+const UNANCHORED_PREP = ["glass of water", "stretch once", "take a breath", "sit near", "stare", "face the task", "stand up and face"];
+/** Digital artifacts that must never appear for physical-only tasks. */
+const DIGITAL_ARTIFACTS = ["laptop", "computer", "email", "inbox", "browser", "app", "website", "spreadsheet", "vscode", "cursor"];
+/** Metacognitive strategies — their value IS the question, not task tokens. */
+const FIDELITY_EXEMPT: StrategyId[] = ["social", "question"];
+
+/** Tokens that anchor an action to THIS task (object/tool/place/person/verb/title). */
+export function anchorTokens(a: TaskAnalysis): Set<string> {
+  const set = new Set<string>();
+  for (const src of [a.object, a.tool ?? "", a.place ?? "", a.person ?? "", a.verb ?? "", a.verbPhrase ?? ""]) {
+    for (const t of tokenize(src)) if (t.length > 2) set.add(t);
+  }
+  for (const t of tokenize(a.title).slice(0, 10)) if (t.length > 2) set.add(t);
+  return set;
+}
+
+const MOVEMENT_STRUCTURES = new Set(["errand", "cleaning", "organizing", "prep"]);
+
+export interface ValidationReport {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * validateCandidate — the ONLY gate between generation and the user.
+ * Checks, in order: emptiness, length, vague/judgmental language,
+ * disguised multi-step, fabricated context, invalid level, medium
+ * compatibility, unanchored body-prep, and task fidelity (does doing
+ * this actually move THIS task forward?).
+ */
+export function validateCandidate(
+  action: string,
+  analysis: TaskAnalysis,
+  strategy: StrategyId,
+  size: Level,
+  source: CandidateAction["source"],
+): ValidationReport {
+  const errors: string[] = [];
+  const s = action.trim();
+
+  if (s.length === 0) errors.push("empty");
+  if (s.length > 160) errors.push("too-long");
+  const lower = s.toLowerCase();
+  if (VAGUE_OPENERS.some((v) => lower.startsWith(v) || lower.includes(v))) errors.push("vague-filler");
+  if (JUDGMENTAL.some((v) => lower.includes(v))) errors.push("judgmental");
+  if (FABRICATED_MARKERS.some((v) => lower.includes(v))) errors.push("fabricated-context");
+  if (/\bthen\b.*\bthen\b/.test(lower)) errors.push("multi-step-disguise");
+  if (s.split(/[.!?]/).filter((x) => x.trim().length > 0).length > 3) errors.push("too-many-sentences");
+  if (typeof size !== "number" || !Number.isInteger(size) || size < 0 || size > 4) errors.push("invalid-level");
+
+  /* medium compatibility — hard rules, both directions */
+  if (analysis.medium === "digital") {
+    if (/(stand up|walk to|clear a hand|sit down at the|face the)/.test(lower)) errors.push("medium-mismatch:physical-for-digital");
+  }
+  if (analysis.medium === "physical") {
+    if (DIGITAL_ARTIFACTS.some((d) => new RegExp(`\\b${d}\\b`).test(lower))) errors.push("medium-mismatch:digital-for-physical");
+  }
+
+  /* unanchored body-prep is only valid for tasks that ARE movement */
+  if (UNANCHORED_PREP.some((u) => lower.includes(u)) && !MOVEMENT_STRUCTURES.has(analysis.structure)) {
+    errors.push("unrelated-prep");
+  }
+
+  /* task fidelity: the action must touch the task's own words */
+  const anchors = anchorTokens(analysis);
+  const actionWords = new Set(tokenize(s));
+  const anchored = [...actionWords].some((w) => anchors.has(w) || anchors.has(w.replace(/s$/, "")));
+  if (!anchored && !FIDELITY_EXEMPT.includes(strategy)) {
+    errors.push("poor-task-fidelity");
+  }
+
+  /* remote candidates earn nothing — same rules, plus explicit flagging */
+  if (source === "remote" && errors.length > 0) errors.push("remote-rejected");
+
+  return { valid: errors.length === 0, errors };
+}
+
 /* ---------------- stage 8: adaptive task size ---------------- */
 
 export interface SizeCtx {
@@ -190,17 +285,8 @@ export function sizeFor(ctx: SizeCtx): Level {
 
 /* ---------------- stage 9: candidate generation ---------------- */
 
-export interface GenCtx {
-  analysis: TaskAnalysis;
-  barrier: Barrier | null;
-  size: Level;
-  memory: EngineMemory;
-  profile: Profile | null;
-  salt: number;
-  capacityEnergy?: number | null;
-  /** When set, this strategy must not win (used after failures). */
-  avoidStrategy?: StrategyId | null;
-}
+/** Generation/selection context — identical shape to RankingContext by design. */
+export type GenCtx = RankingContext;
 
 const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 
@@ -306,29 +392,20 @@ function scoreCandidate(c: CandidateAction, ctx: GenCtx): number {
 
 /* ---------------- stage 11: guardrails ---------------- */
 
-const VAGUE_OPENERS = ["just start", "break it into", "be more productive", "focus on your goals", "try harder"];
-const JUDGMENTAL = ["lazy", "procrastinat", "you should have", "stop being", "discipline"];
-/** Fabricated-context markers — templates must never produce these. */
-const FABRICATED = ["where it happens", "spot where", "where the ", "happens. nothing"];
-
 /**
- * Validity rules. Reject anything that is empty, vague filler,
- * judgmental, a disguised multi-step plan, unrunnable as written,
- * or built on a fabricated location/context. Templates pass by
- * construction; this gate also covers synthesized and AI-provided
- * steps, so every emission path shares one definition of "valid".
+ * Language-layer guardrails (task-independent). The full task-aware
+ * validation lives in validateCandidate — this is its first stage and
+ * is kept exported for contexts that only have a string in hand.
  */
 export function passesGuardrails(action: string): boolean {
   const s = action.trim();
   if (s.length < 8 || s.length > 160) return false;
   const lower = s.toLowerCase();
-  if (VAGUE_OPENERS.some((v) => lower.startsWith(v))) return false;
+  if (VAGUE_OPENERS.some((v) => lower.startsWith(v) || lower.includes(v))) return false;
   if (JUDGMENTAL.some((v) => lower.includes(v))) return false;
-  if (FABRICATED.some((v) => lower.includes(v))) return false;
-  /* disguised multi-step: chained instructions */
+  if (FABRICATED_MARKERS.some((v) => lower.includes(v))) return false;
   if (/\bthen\b.*\bthen\b/.test(lower)) return false;
-  const sentences = s.split(/[.!?]/).filter((x) => x.trim().length > 0).length;
-  if (sentences > 3) return false;
+  if (s.split(/[.!?]/).filter((x) => x.trim().length > 0).length > 3) return false;
   return true;
 }
 
@@ -342,7 +419,8 @@ function buildCandidates(ctx: GenCtx): CandidateAction[] {
   const push = (action: string, strategy: StrategyId, source: CandidateAction["source"]) => {
     const k = normalizeAction(action);
     if (seen.has(k)) return;
-    if (!passesGuardrails(action)) return;
+    /* every candidate — template, decompose or fallback — passes the ONE validator */
+    if (!validateCandidate(action, a, strategy, ctx.size, source).valid) return;
     seen.add(k);
     out.push({ action, strategy, size: ctx.size, costs: costsFor(strategy, a, ctx.size, ctx.profile), source });
   };
@@ -376,23 +454,30 @@ function buildCandidates(ctx: GenCtx): CandidateAction[] {
   return out;
 }
 
-/** Structurally distinct fallbacks — used only when everything else is exhausted. */
-const FRESH_FALLBACKS: Array<(n: number) => string> = [
-  (n) => `Give it exactly ${n} seconds, any way you like — then reassess.`,
-  (n) => `Set a ${n}-second timer and start mid-motion. No setup allowed.`,
-  (n) => `Count to ${n} slowly — on zero, make the first physical move.`,
-  (n) => `${n} seconds of motion, zero quality required. Go.`,
-  (n) => `One breath in, one out — then ${n} seconds, eyes on the thing.`,
+/**
+ * Structurally distinct fallbacks — used only when everything else is
+ * exhausted. Every one stays anchored to the task object, so even the
+ * last resort is real progress on THIS task, not generic motion.
+ */
+const FRESH_FALLBACKS: Array<(n: number, o: string) => string> = [
+  (n, o) => `Give ${o} exactly ${n} seconds — any way you like.`,
+  (n, o) => `Set a ${n}-second timer and start ${o} mid-motion. No setup allowed.`,
+  (n, o) => `Count to ${n} — on zero, make the first move on ${o}.`,
+  (n, o) => `${n} seconds on ${o}, zero quality required. Go.`,
+  (n, o) => `One breath in, one out — then ${n} seconds on ${o}.`,
 ];
 
 function freshFallback(ctx: GenCtx): string {
   const secs = 10 + ((ctx.salt * 13 + ctx.memory.shown.length * 17) % 50);
+  const o = ctx.analysis.object;
   for (let i = 0; i < FRESH_FALLBACKS.length; i++) {
-    const candidate = FRESH_FALLBACKS[(ctx.salt + i) % FRESH_FALLBACKS.length](secs + i * 5);
-    if (!wasShown(ctx.memory, candidate)) return candidate;
+    const candidate = FRESH_FALLBACKS[(ctx.salt + i) % FRESH_FALLBACKS.length](secs + i * 5, o);
+    if (!wasShown(ctx.memory, candidate) && validateCandidate(candidate, ctx.analysis, "timebox", ctx.size, "fallback").valid) {
+      return candidate;
+    }
   }
-  /* truly nothing left — any of them is still valid */
-  return FRESH_FALLBACKS[ctx.salt % FRESH_FALLBACKS.length](secs);
+  /* truly nothing left — the anchored time-box is still valid by construction */
+  return FRESH_FALLBACKS[ctx.salt % FRESH_FALLBACKS.length](secs, o);
 }
 
 const EFFORT_LABELS: Record<Level, "tiny" | "small" | "medium"> = {
@@ -403,47 +488,139 @@ const EFFORT_LABELS: Record<Level, "tiny" | "small" | "medium"> = {
   4: "tiny",
 };
 
-/** Full reasoning pass: candidates → score → dedupe → select → explain. */
-export function selectStep(ctx: GenCtx): Decision {
+/* ---------------- ranker architecture ----------------
+   Ranking is separated from generation and validation by design.
+   HeuristicRanker preserves the deterministic baseline exactly.
+   LearnedRanker is a FUTURE contract only — no online learning here.
+   --------------------------------------------------- */
+
+/**
+ * Future learning-based ranker. Deliberately unimplemented: there is
+ * no training data pipeline yet, and shipping a fake one would violate
+ * the "no claimed learning without evidence" rule.
+ */
+export interface LearnedRanker extends CandidateRanker {
+  readonly modelVersion: string;
+}
+
+/**
+ * Feature flag for future adaptive/exploration policies.
+ * MUST stay false: users are never exposed to experimental exploration
+ * unless explicitly enabled, and only locally-valid candidates may
+ * ever be explored.
+ */
+export const ADAPTIVE_POLICY_ENABLED = false;
+
+export class HeuristicRanker implements CandidateRanker {
+  readonly id = "heuristic-v1";
+
+  rank(context: RankingContext, candidates: CandidateAction[]): RankedCandidate[] {
+    return candidates
+      .map((candidate) => ({ candidate, score: scoreCandidate(candidate, context) }))
+      .sort((x, y) => y.score - x.score);
+  }
+}
+
+export const defaultRanker: CandidateRanker = new HeuristicRanker();
+
+/**
+ * Full reasoning pass:
+ *   generate (validated) → rank → hard dedupe → exhaustion sweep →
+ *   select → explain → trace (privacy-safe).
+ */
+export function selectStep(ctx: GenCtx, ranker: CandidateRanker = defaultRanker): Decision {
   const candidates = buildCandidates(ctx);
-  const scored = candidates.map((c) => ({ c, score: scoreCandidate(c, ctx) })).sort((x, y) => y.score - x.score);
+  const ranked = ranker.rank(ctx, candidates);
 
   /* HARD anti-repetition: never re-serve a shown action/intent while a distinct one exists */
-  const unshown = scored.filter(({ c }) => !wasShown(ctx.memory, c.action));
-  const winner = unshown[0]?.c;
-  const winnerScore = unshown[0]?.score ?? 0;
+  const unshown = ranked.filter(({ candidate }) => !wasShown(ctx.memory, candidate.action));
+
+  /* Pool exhaustion — ordered recovery, all paths re-validated:
+     1. deterministic decomposition at other sizes
+     2. a fresh synthesized task-anchored candidate              */
+  let winner: CandidateAction | null = unshown[0]?.candidate ?? null;
+  let winnerScore = unshown[0]?.score ?? 0;
+  let viaFallback = false;
 
   if (!winner) {
-    /* every candidate exhausted — synthesize a fresh, medium-neutral time-box */
-    return {
-      action: freshFallback(ctx),
+    const levels: Level[] = [ctx.size, 3, 4, 2, 1, 0];
+    for (const lv of levels) {
+      const rung = decompose(ctx.analysis, lv);
+      if (
+        !wasShown(ctx.memory, rung) &&
+        validateCandidate(rung, ctx.analysis, lv >= 2 ? "tiny" : "direct", lv, "decompose").valid
+      ) {
+        winner = {
+          action: rung,
+          strategy: lv >= 2 ? "tiny" : "direct",
+          size: lv,
+          costs: costsFor(lv >= 2 ? "tiny" : "direct", ctx.analysis, lv, ctx.profile),
+          source: "decompose",
+        };
+        winnerScore = 0;
+        viaFallback = true;
+        break;
+      }
+    }
+  }
+  if (!winner) {
+    const fb = freshFallback(ctx);
+    winner = {
+      action: fb,
       strategy: "timebox",
       size: ctx.size,
-      note: null,
-      reason: `barrier=${ctx.barrier ?? "none"} size=${ctx.size}/4 strategy=timebox (fresh fallback)`,
-      confidence: 0.7,
-      expectedEffort: EFFORT_LABELS[ctx.size],
-      barrierKind: ctx.barrier === "unclear" || ctx.barrier === "overwhelmed" ? "task" : "starting",
+      costs: { progress: 0.4, effort: 0.15, initiation: 0.15, ambiguity: 0.15, cognitive: 0.1, emotional: 0.1, dependencies: 0, confidence: 0.9 },
+      source: "fallback",
     };
+    winnerScore = 0;
+    viaFallback = true;
   }
 
   /* concise decision metadata — facts, not chain-of-thought */
-  const topFactor =
-    ctx.barrier && BARRIER_STRATEGIES[ctx.barrier][0] === winner.strategy
+  const topFactor = viaFallback
+    ? "pool exhausted — synthesized fresh task-anchored step"
+    : ctx.barrier && BARRIER_STRATEGIES[ctx.barrier][0] === winner.strategy
       ? `counters ${ctx.barrier}`
       : winner.source === "decompose"
         ? "scoped to this task's own shape"
         : `fits ${ctx.analysis.structure} best`;
   const reason = `barrier=${ctx.barrier ?? "none"} size=${ctx.size}/4 strategy=${winner.strategy} (${topFactor})`;
 
+  /* decision trace — observable metadata only, task text never leaves as raw text downstream */
+  const traces: CandidateTrace[] = ranked.slice(0, 10).map(({ candidate, score }) => ({
+    action: candidate.action,
+    strategy: candidate.strategy,
+    size: candidate.size,
+    score: Math.round(score * 1000) / 1000,
+    valid: validateCandidate(candidate.action, ctx.analysis, candidate.strategy, candidate.size, candidate.source).valid,
+    source: candidate.source,
+  }));
+  const chosenIndex = Math.max(0, traces.findIndex((t) => t.action === winner?.action));
+  const trace: DecisionTrace = {
+    policyVersion: POLICY_VERSION,
+    analysisVersion: ctx.analysis.analysisVersion,
+    candidates: traces.length ? traces : [{
+      action: winner.action,
+      strategy: winner.strategy,
+      size: winner.size,
+      score: 0,
+      valid: true,
+      source: winner.source,
+    }],
+    chosenIndex: traces.length ? chosenIndex : 0,
+    selectionProbability: 1,
+    createdAt: Date.now(),
+  };
+  recordDecision(ctx.analysis.title, trace, traces.filter((t) => !t.valid).length);
+
   return {
     action: winner.action,
     strategy: winner.strategy,
-    size: ctx.size,
+    size: winner.size,
     note: null,
     reason,
     confidence: Math.round(Math.max(0.2, Math.min(0.95, winnerScore + 0.5)) * 100) / 100,
-    expectedEffort: EFFORT_LABELS[ctx.size],
+    expectedEffort: EFFORT_LABELS[winner.size],
     barrierKind:
       ctx.barrier === "unclear" || ctx.barrier === "overwhelmed"
         ? "task"
@@ -515,8 +692,10 @@ export function nextStep(
  */
 export function previewSteps(draft: Draft, profile: Profile | null, count = 4): PreviewStep[] {
   const usedIntents = new Set<string>();
-  const take = (action: string | null): boolean => {
-    if (!action || !passesGuardrails(action)) return false;
+  /* ONE validation path for every rung — local, decomposed or remote */
+  const take = (action: string | null, strategy: StrategyId, size: Level, source: CandidateAction["source"]): boolean => {
+    if (!action) return false;
+    if (!validateCandidate(action, draft.analysis, strategy, size, source).valid) return false;
     const k = intentKey(action);
     if (usedIntents.has(k)) return false;
     usedIntents.add(k);
@@ -527,7 +706,8 @@ export function previewSteps(draft: Draft, profile: Profile | null, count = 4): 
     /* AI-provided rungs pass through the SAME validation as local ones */
     const out: PreviewStep[] = [];
     draft.ladderOverride.slice(0, count).forEach((action, i) => {
-      if (take(action)) out.push({ action, strategy: "direct", size: clampLevel(draft.level + i) });
+      const size = clampLevel(draft.level + i);
+      if (take(action, "direct", size, "remote")) out.push({ action, strategy: "direct", size });
     });
     return out;
   }
@@ -546,8 +726,9 @@ export function previewSteps(draft: Draft, profile: Profile | null, count = 4): 
     /* attempt order alternates so the ladder reads strategy → rung → strategy → rung */
     const tryDecompose = () => {
       if (placed) return;
-      if (take(rung)) {
-        out.push({ action: rung, strategy: size >= 2 ? "tiny" : "direct", size });
+      const strategy: StrategyId = size >= 2 ? "tiny" : "direct";
+      if (take(rung, strategy, size, "decompose")) {
+        out.push({ action: rung, strategy, size });
         placed = true;
       }
     };
