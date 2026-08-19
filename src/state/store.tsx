@@ -9,10 +9,11 @@ import {
   type ReactNode,
 } from "react";
 import type {
-  Blocker,
+  Barrier,
   Difficulty,
   Draft,
   EntryKind,
+  FeedbackKind,
   Outcome,
   Profile,
   Screen,
@@ -22,13 +23,21 @@ import type {
   StuckReason,
 } from "../engine/types";
 import {
-  blockerIntervention,
+  adaptFromFeedback,
+  advanceStep,
+  analyzeTask,
+  barrierIntervention,
   computeProfile,
-  detectDomain,
+  emptyMemory,
   planFirstStep,
+  reasonToBarrier,
+  rescueIntervention,
   tryRemoteEngine,
+  runEngineSelfTest,
 } from "../engine/localEngine";
 import { DEFAULT_SETTINGS, clearPersisted, loadPersisted, savePersisted, uid } from "../lib/persist";
+
+if (import.meta.env.DEV) runEngineSelfTest();
 
 export interface State {
   screen: Screen;
@@ -42,15 +51,16 @@ export interface State {
 
 export type Action =
   | { type: "nav"; screen: Screen }
-  | { type: "enterTask"; title: string; entry: EntryKind; level?: number; ladderOverride?: string[] | null }
+  | { type: "enterTask"; title: string; entry: EntryKind; ladderOverride?: string[] | null }
   | { type: "difficulty"; value: Difficulty }
-  | { type: "answerBlocker"; blocker: Blocker }
+  | { type: "answerBlocker"; blocker: Barrier }
   | { type: "setLevel"; level: number }
   | { type: "resize"; delta: number }
   | { type: "start"; durationSec: number; bodyDouble: boolean; kind?: SessionKind }
   | { type: "next" }
   | { type: "rescued" }
-  | { type: "applyRescue"; reason: StuckReason; action?: string; level?: number }
+  | { type: "applyRescue"; reason: StuckReason }
+  | { type: "feedback"; kind: FeedbackKind }
   | { type: "endSession" }
   | { type: "answer"; outcome: Outcome }
   | { type: "restartSmaller" }
@@ -63,22 +73,27 @@ export type Action =
   | { type: "untoast" };
 
 function makeDraft(title: string, entry: EntryKind, ladderOverride: string[] | null): Draft {
+  const analysis = analyzeTask(title);
   return {
-    title: title.trim(),
-    domain: detectDomain(title),
+    title: analysis.title,
+    analysis,
     level: 0,
     stepIndex: 0,
     stepsDone: 0,
     rescues: 0,
+    feedbacks: 0,
     startedAt: 0,
+    enteredAt: Date.now(),
     sessionId: null,
     kind: "focus",
     override: null,
+    strategy: null,
+    note: null,
     ladderOverride,
     entry,
     blocker: null,
-    lastStrategy: null,
-    note: null,
+    lastFeedback: null,
+    memory: emptyMemory(),
   };
 }
 
@@ -87,7 +102,20 @@ function patchSession(sessions: SessionRecord[], id: string | null, patch: Parti
   return sessions.map((s) => (s.id === id ? { ...s, ...patch } : s));
 }
 
+/** Migrate drafts persisted by older engine versions. */
+function migrateDraft(d: unknown): Draft | null {
+  const draft = d as Draft | null;
+  if (!draft) return null;
+  if (!draft.analysis || !draft.memory) {
+    const fresh = makeDraft(draft.title ?? "", draft.entry ?? "normal", null);
+    return { ...fresh, ...draft, analysis: fresh.analysis, memory: fresh.memory };
+  }
+  return draft;
+}
+
 function reducer(state: State, a: Action): State {
+  const profile = computeProfile(state.sessions);
+
   switch (a.type) {
     case "nav":
       return { ...state, screen: a.screen, paused: false, pausedAt: null };
@@ -96,33 +124,24 @@ function reducer(state: State, a: Action): State {
       const title = a.title.trim().slice(0, 120);
       if (!title) return state;
       const draft = makeDraft(title, a.entry, a.ladderOverride ?? null);
-      const profile = computeProfile(state.sessions);
 
       if (a.entry === "onetap" || a.entry === "statecheck" || a.entry === "shrinker" || a.entry === "overwhelm") {
-        const plan = planFirstStep({ title, domain: draft.domain, profile });
-        if (a.entry === "onetap") {
-          return {
-            ...state,
-            draft: { ...draft, level: plan.level, override: plan.action, note: plan.note },
-            screen: { id: "onestep" },
-          };
-        }
-        if (a.entry === "statecheck") {
-          return { ...state, draft: { ...draft, level: plan.level, note: plan.note }, screen: { id: "statecheck" } };
-        }
-        if (a.entry === "shrinker") {
-          return {
-            ...state,
-            draft: { ...draft, level: a.level ?? plan.level, note: plan.note },
-            screen: { id: "shrinker" },
-          };
-        }
-        /* overwhelm — start one notch smaller than the plan suggests */
-        return {
-          ...state,
-          draft: { ...draft, level: a.level ?? Math.min(4, plan.level + 1) },
-          screen: { id: "overwhelm" },
+        const plan = planFirstStep(draft.analysis, {
+          profile,
+          extraShrink: a.entry === "overwhelm" ? 1 : 0,
+        });
+        const withPlan: Draft = {
+          ...draft,
+          level: plan.size,
+          override: plan.action,
+          strategy: plan.strategy,
+          note: "engine-picked start",
+          memory: plan.memory,
         };
+        if (a.entry === "onetap") return { ...state, draft: withPlan, screen: { id: "onestep" } };
+        if (a.entry === "statecheck") return { ...state, draft: withPlan, screen: { id: "statecheck" } };
+        if (a.entry === "shrinker") return { ...state, draft: withPlan, screen: { id: "shrinker" } };
+        return { ...state, draft: withPlan, screen: { id: "overwhelm" } };
       }
 
       return {
@@ -134,62 +153,115 @@ function reducer(state: State, a: Action): State {
 
     case "difficulty": {
       if (!state.draft) return state;
-      if (a.value === "easy") return { ...state, screen: { id: "quick" } };
-      if (a.value === "impossible") {
-        return { ...state, draft: { ...state.draft, level: 3 }, screen: { id: "micro" } };
+      if (a.value === "easy") {
+        const plan = planFirstStep(state.draft.analysis, { profile, durationSec: 10 });
+        const draft: Draft = {
+          ...state.draft,
+          level: plan.size,
+          override: plan.action,
+          strategy: plan.strategy,
+          memory: plan.memory,
+          note: "easy day — go straight in",
+        };
+        return { ...state, draft, screen: { id: "quick" } };
       }
-      /* adaptive: nudge toward the step size that has produced momentum before */
-      const profile = computeProfile(state.sessions);
-      const base = a.value === "abit" ? 1 : 2;
-      let level =
-        profile.bestLevel != null && profile.confidence !== "none" ? Math.max(base, profile.bestLevel) : base;
-      if (a.value === "abit") level = Math.min(level, 3);
-      return { ...state, draft: { ...state.draft, level }, screen: { id: "shrinker" } };
+      if (a.value === "impossible") {
+        const plan = planFirstStep(state.draft.analysis, { profile, extraShrink: 2, durationSec: 10 });
+        const draft: Draft = {
+          ...state.draft,
+          level: plan.size,
+          override: plan.action,
+          strategy: plan.strategy,
+          memory: plan.memory,
+          note: "micro start",
+        };
+        return { ...state, draft, screen: { id: "micro" } };
+      }
+      const plan = planFirstStep(state.draft.analysis, {
+        profile,
+        extraShrink: a.value === "hard" ? 1 : 0,
+      });
+      const draft: Draft = {
+        ...state.draft,
+        level: plan.size,
+        override: plan.action,
+        strategy: plan.strategy,
+        memory: plan.memory,
+      };
+      return { ...state, draft, screen: { id: "shrinker" } };
     }
 
     case "answerBlocker": {
       if (!state.draft) return { ...state, screen: { id: "home" } };
-      const iv = blockerIntervention(state.draft.domain, a.blocker, state.draft.level);
-      const draft: Draft = { ...state.draft, blocker: a.blocker, entry: "statecheck" };
+      const draft0: Draft = { ...state.draft, blocker: a.blocker, entry: "statecheck" };
+      const iv = barrierIntervention(draft0, a.blocker, profile);
       if (iv.reset) {
         return {
           ...state,
-          draft,
-          screen: { id: "reset", returnTo: draft.startedAt > 0 ? "focus" : "onestep" },
+          draft: draft0,
+          screen: { id: "reset", returnTo: draft0.startedAt > 0 ? "focus" : "onestep" },
         };
       }
-      return {
-        ...state,
-        draft: {
-          ...draft,
-          override: iv.action,
-          level: Math.min(4, draft.level + iv.levelShift),
-          note: iv.headline,
-        },
-        screen: { id: "onestep" },
+      const draft: Draft = {
+        ...draft0,
+        override: iv.action,
+        level: iv.size,
+        strategy: iv.strategy,
+        note: iv.headline,
+        memory: iv.memory,
       };
+      return { ...state, draft, screen: { id: "onestep" } };
     }
 
     case "setLevel": {
       if (!state.draft) return state;
       const level = Math.max(0, Math.min(4, a.level));
-      return { ...state, draft: { ...state.draft, level } };
+      const plan = planFirstStep(state.draft.analysis, { profile });
+      const res = advanceStep({ ...state.draft, level }, profile);
+      return {
+        ...state,
+        draft: {
+          ...state.draft,
+          level,
+          override: res.override,
+          strategy: res.strategy,
+          memory: res.memory,
+          stepsDone: state.draft.stepsDone,
+          note: plan.note ?? state.draft.note,
+        },
+      };
     }
 
     case "resize": {
       if (!state.draft) return state;
       const level = Math.max(0, Math.min(4, state.draft.level + a.delta));
-      return { ...state, draft: { ...state.draft, level, override: null, note: null } };
+      const base: Draft = { ...state.draft, level, lastFeedback: a.delta > 0 ? "tooBig" : "worked" };
+      const res = adaptFromFeedback(base, profile, a.delta > 0 ? "tooBig" : "worked");
+      return {
+        ...state,
+        draft: {
+          ...state.draft,
+          level: res.level,
+          override: res.override,
+          strategy: res.strategy,
+          memory: res.memory,
+          feedbacks: res.feedbacks,
+          lastFeedback: res.lastFeedback,
+          note: res.note,
+        },
+      };
     }
 
     case "start": {
       if (!state.draft) return state;
       const id = uid();
       const kind: SessionKind = a.kind ?? "focus";
+      const timeToStart =
+        state.draft.enteredAt > 0 ? Math.max(0, Math.round((Date.now() - state.draft.enteredAt) / 1000)) : null;
       const record: SessionRecord = {
         id,
         title: state.settings.saveTitles ? state.draft.title : null,
-        domain: state.draft.domain,
+        structure: state.draft.analysis.structure,
         kind,
         startedAt: Date.now(),
         endedAt: null,
@@ -197,16 +269,17 @@ function reducer(state: State, a: Action): State {
         steps: 0,
         rescues: state.draft.rescues,
         outcome: null,
-        level: state.draft.level,
+        size: state.draft.level,
         duration: a.durationSec,
         entry: state.draft.entry,
-        blocker: state.draft.blocker,
-        strategy: state.draft.lastStrategy,
+        barrier: state.draft.blocker,
+        strategy: state.draft.strategy,
+        timeToStart,
       };
       return {
         ...state,
         sessions: [...state.sessions, record],
-        draft: { ...state.draft, startedAt: Date.now(), sessionId: id, kind, override: null },
+        draft: { ...state.draft, startedAt: Date.now(), sessionId: id, kind },
         screen: { id: "focus", durationSec: a.durationSec, bodyDouble: a.bodyDouble },
         paused: false,
         pausedAt: null,
@@ -215,12 +288,23 @@ function reducer(state: State, a: Action): State {
 
     case "next": {
       if (!state.draft) return state;
-      const sessions = patchSession(state.sessions, state.draft.sessionId, {});
-      const patched = sessions.map((s) => (s.id === state.draft?.sessionId ? { ...s, steps: s.steps + 1 } : s));
+      const res = advanceStep(state.draft, profile);
+      const sessions = state.sessions.map((s) =>
+        s.id === state.draft?.sessionId ? { ...s, steps: s.steps + 1 } : s,
+      );
       return {
         ...state,
-        sessions: patched,
-        draft: { ...state.draft, stepsDone: state.draft.stepsDone + 1, stepIndex: state.draft.stepIndex + 1, override: null },
+        sessions,
+        draft: {
+          ...state.draft,
+          stepsDone: res.stepsDone,
+          stepIndex: state.draft.stepIndex + 1,
+          override: res.override,
+          strategy: res.strategy,
+          level: res.level,
+          memory: res.memory,
+          lastFeedback: "worked",
+        },
       };
     }
 
@@ -237,10 +321,45 @@ function reducer(state: State, a: Action): State {
 
     case "applyRescue": {
       if (!state.draft) return state;
-      const level = a.level !== undefined ? Math.max(0, Math.min(4, a.level)) : state.draft.level;
+      const barrier = reasonToBarrier(a.reason);
+      const draft0: Draft = { ...state.draft, blocker: barrier, rescues: state.draft.rescues };
+      const iv = rescueIntervention(draft0, a.reason, profile);
+      if (iv.reset) return state; /* handled by the screen before dispatch */
       return {
         ...state,
-        draft: { ...state.draft, level, override: a.action ?? null, lastStrategy: a.reason, note: null },
+        draft: {
+          ...draft0,
+          override: iv.action,
+          level: iv.size,
+          strategy: iv.strategy,
+          note: iv.headline,
+          memory: iv.memory,
+        },
+      };
+    }
+
+    case "feedback": {
+      if (!state.draft) return state;
+      const res = adaptFromFeedback(state.draft, profile, a.kind);
+      const sessions =
+        a.kind === "worked"
+          ? patchSession(state.sessions, state.draft.sessionId, { steps: undefined }).map((s) =>
+              s.id === state.draft?.sessionId ? { ...s, steps: s.steps + 1 } : s,
+            )
+          : state.sessions;
+      return {
+        ...state,
+        sessions,
+        draft: {
+          ...state.draft,
+          override: res.override,
+          level: res.level,
+          strategy: res.strategy,
+          memory: res.memory,
+          feedbacks: res.feedbacks,
+          lastFeedback: res.lastFeedback,
+          note: res.note,
+        },
       };
     }
 
@@ -262,26 +381,28 @@ function reducer(state: State, a: Action): State {
 
     case "answer": {
       if (!state.draft) return state;
-      const draft: Draft = { ...state.draft };
-      let sessions = state.sessions;
-      if (draft.sessionId) {
-        sessions = patchSession(state.sessions, draft.sessionId, { outcome: a.outcome });
-      }
+      const sessions = patchSession(state.sessions, state.draft.sessionId, { outcome: a.outcome });
       if (a.outcome === "stuck") {
         return { ...state, sessions, screen: { id: "rescue" } };
       }
-      return { ...state, sessions, draft };
+      return { ...state, sessions };
     }
 
     case "restartSmaller": {
       if (!state.draft) return { ...state, screen: { id: "home" } };
+      const base: Draft = { ...state.draft, entry: "recover" };
+      const res = adaptFromFeedback(base, profile, "tooBig");
       return {
         ...state,
         draft: {
           ...state.draft,
-          level: Math.min(4, state.draft.level + 1),
-          override: null,
-          note: null,
+          level: res.level,
+          override: res.override,
+          strategy: res.strategy,
+          memory: res.memory,
+          feedbacks: res.feedbacks,
+          lastFeedback: res.lastFeedback,
+          note: res.note,
           entry: "recover",
         },
         screen: { id: "shrinker" },
@@ -290,13 +411,18 @@ function reducer(state: State, a: Action): State {
 
     case "recover": {
       if (!state.draft) return { ...state, screen: { id: "home" } };
+      const res = adaptFromFeedback(state.draft, profile, "tooBig");
       return {
         ...state,
         draft: {
           ...state.draft,
-          level: Math.min(4, state.draft.level + 1),
-          override: null,
-          note: null,
+          level: res.level,
+          override: res.override,
+          strategy: res.strategy,
+          memory: res.memory,
+          feedbacks: res.feedbacks,
+          lastFeedback: res.lastFeedback,
+          note: res.note,
           entry: "recover",
         },
         screen: { id: "recover" },
@@ -334,7 +460,7 @@ function reducer(state: State, a: Action): State {
 interface Ctx {
   state: State;
   dispatch: Dispatch<Action>;
-  submitTask: (title: string, entry: EntryKind, level?: number) => Promise<void>;
+  submitTask: (title: string, entry: EntryKind) => Promise<void>;
   profile: Profile;
 }
 
@@ -346,7 +472,7 @@ function initState(): State {
     saved.pending && saved.pending.startedAt > 0 && Date.now() - saved.pending.startedAt > 45 * 60 * 1000;
   return {
     screen: { id: "home" },
-    draft: overdue ? null : saved.pending,
+    draft: overdue ? null : migrateDraft(saved.pending),
     sessions: saved.sessions,
     settings: saved.settings,
     paused: false,
@@ -389,13 +515,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const endpoint = state.settings.aiEndpoint.trim();
   const submitTask = useCallback(
-    async (title: string, entry: EntryKind, level?: number) => {
+    async (title: string, entry: EntryKind) => {
       let ladder: string[] | null = null;
       if (endpoint && entry === "normal") {
         ladder = await tryRemoteEngine(endpoint, title);
         if (!ladder) dispatch({ type: "toast", msg: "AI is taking a break — the built-in engine has you." });
       }
-      dispatch({ type: "enterTask", title, entry, ladderOverride: ladder, level });
+      dispatch({ type: "enterTask", title, entry, ladderOverride: ladder });
     },
     [endpoint],
   );

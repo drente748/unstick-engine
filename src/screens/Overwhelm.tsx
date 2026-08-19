@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useApp } from "../state/store";
 import { Btn, Icon } from "../components/ui";
-import { currentAction } from "../engine/localEngine";
 
 /** Anti-Overwhelm Mode — everything is removed except ONE thing. */
 export default function Overwhelm() {
@@ -19,13 +18,11 @@ export default function Overwhelm() {
       setTimeout(() => setErr(false), 650);
       return;
     }
-    void submitTask(t, "overwhelm", 2);
+    void submitTask(t, "overwhelm");
     setPhase(2);
   }
 
-  const action = draft
-    ? currentAction(draft.domain, draft.level, 0, draft.override, draft.ladderOverride)
-    : "";
+  const action = draft?.override ?? "";
 
   return (
     <div

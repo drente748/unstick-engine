@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useApp } from "../state/store";
 import { Btn, Icon, Live } from "../components/ui";
-import { currentAction } from "../engine/localEngine";
 
 /** Interruption & restart recovery — back to the smallest NEXT action, never a restart. */
 export default function Recover() {
@@ -13,7 +12,7 @@ export default function Recover() {
   }, [draft, dispatch]);
   if (!draft) return null;
 
-  const action = currentAction(draft.domain, draft.level, 0, draft.override, draft.ladderOverride);
+  const action = draft.override ?? "Take one small step toward it.";
 
   return (
     <div className="mx-auto w-full max-w-xl px-5 pb-16 pt-12 sm:pt-20">

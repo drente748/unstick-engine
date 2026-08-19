@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../state/store";
 import { Btn, Icon, Live, formatClock } from "../components/ui";
-import type { Outcome } from "../engine/types";
+import type { FeedbackKind, Outcome } from "../engine/types";
+
+const FEEDBACKS: Array<{ v: FeedbackKind; label: string }> = [
+  { v: "worked", label: "That worked" },
+  { v: "tooBig", label: "Too big" },
+  { v: "stuck", label: "Still stuck" },
+  { v: "irrelevant", label: "Not relevant" },
+];
 
 export default function Complete() {
   const { state, dispatch } = useApp();
   const [answered, setAnswered] = useState<Outcome | null>(null);
+  const [fb, setFb] = useState<FeedbackKind | null>(null);
   const draft = state.draft;
   const session = draft?.sessionId ? state.sessions.find((s) => s.id === draft.sessionId) : undefined;
 
@@ -105,18 +113,49 @@ export default function Complete() {
         </div>
       )}
 
-      {answered === "stopped" && (
+      {answered === "stopped" && !fb && (
         <div className="anim-pop">
           <h2 className="font-display text-4xl font-extrabold tracking-tight text-ink sm:text-5xl">That's okay.</h2>
           <p className="mt-4 max-w-md text-lg text-ink-dim">
-            You still started. Stopping is allowed here — we can make the next attempt even smaller.
+            You still started, and stopping is allowed here. One quick note helps the engine aim better next time.
           </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Btn variant="primary" size="lg" onClick={() => dispatch({ type: "recover" })}>
-              <Icon n="loop" className="h-4 w-4" /> NEXT TINY STEP
-            </Btn>
-            <Btn size="lg" onClick={() => dispatch({ type: "restartSmaller" })}>
-              <Icon n="chevronsDown" className="h-4 w-4" /> RESTART SMALLER
+          <p className="font-display mt-7 text-lg font-bold text-ink">How did that step feel?</p>
+          <div className="mt-3.5 flex flex-wrap gap-2.5" role="group" aria-label="Step feedback">
+            {FEEDBACKS.map((f) => (
+              <button
+                key={f.v}
+                type="button"
+                className="chip"
+                onClick={() => {
+                  setFb(f.v);
+                  dispatch({ type: "feedback", kind: f.v });
+                }}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {answered === "stopped" && fb && (
+        <div className="anim-pop">
+          <Live msg={`New next step: ${draft.override ?? ""}`} />
+          <p className="kicker text-butter-400">noted — recalibrated</p>
+          <h2 className="font-display mt-3 text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">
+            Here's the next tiny move.
+          </h2>
+          {draft.note && <p className="mt-2 text-sm text-ink-mute">{draft.note}</p>}
+          <p className="card mt-5 border-mint-400/50 px-5 py-4 text-xl font-bold leading-snug text-mint-300">
+            {draft.override}
+          </p>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <Btn
+              variant="primary"
+              size="lg"
+              onClick={() => dispatch({ type: "start", durationSec: 10, bodyDouble: false })}
+            >
+              GO — 10 SECONDS <Icon n="play" className="h-4 w-4" />
             </Btn>
             <Btn variant="quiet" size="lg" onClick={() => dispatch({ type: "clearPending" })}>
               DONE FOR NOW

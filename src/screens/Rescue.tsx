@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../state/store";
 import { Btn, Icon, Live, formatClock } from "../components/ui";
-import { rescueStrategy } from "../engine/localEngine";
-import type { RescueResult, StuckReason } from "../engine/types";
+import { rescueIntervention } from "../engine/localEngine";
+import type { StuckReason } from "../engine/types";
 
 const REASONS: Array<{ v: StuckReason; label: string }> = [
   { v: "unknown-next", label: "I don't know what to do next" },
@@ -16,35 +16,30 @@ const REASONS: Array<{ v: StuckReason; label: string }> = [
 ];
 
 export default function Rescue() {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, profile } = useApp();
   const [picked, setPicked] = useState<StuckReason | null>(null);
-  const [result, setResult] = useState<RescueResult | null>(null);
+  const [result, setResult] = useState<{ headline: string; action: string } | null>(null);
   const draft = state.draft;
 
   function pick(reason: StuckReason) {
     if (!draft) return;
     dispatch({ type: "rescued" });
-    const res = rescueStrategy(draft.domain, reason, draft.level);
-    if (res.reset) {
+    const iv = rescueIntervention(draft, reason, profile);
+    if (iv.reset) {
       dispatch({
         type: "nav",
-        screen: { id: "reset", returnTo: draft.startedAt > 0 ? "focus" : "shrinker" },
+        screen: { id: "reset", returnTo: draft.startedAt > 0 ? "focus" : "onestep" },
       });
       return;
     }
     setPicked(reason);
-    setResult(res);
+    setResult({ headline: iv.headline, action: iv.action });
   }
 
   function tryThis() {
     if (!draft || !result || !picked) return;
-    dispatch({ type: "applyRescue", reason: picked, action: result.action, level: result.level });
-    if (result.level !== undefined) dispatch({ type: "nav", screen: { id: "shrinker" } });
-    else
-      dispatch({
-        type: "nav",
-        screen: { id: "focus", durationSec: 10, bodyDouble: false },
-      });
+    dispatch({ type: "applyRescue", reason: picked });
+    dispatch({ type: "nav", screen: { id: "onestep" } });
   }
 
   if (!draft) {
@@ -89,10 +84,10 @@ export default function Rescue() {
 
       {result && (
         <div key={picked} className="anim-pop mt-8">
-          <Live msg={result.message} />
+          <Live msg={result.headline} />
           <div className="card border-clay-400/40 p-6 sm:p-7">
             <p className="kicker mb-3 text-clay-300">the counter-move</p>
-            <p className="font-display text-2xl font-extrabold leading-snug text-ink sm:text-3xl">{result.message}</p>
+            <p className="font-display text-2xl font-extrabold leading-snug text-ink sm:text-3xl">{result.headline}</p>
             {result.action && (
               <p className="mt-4 inline-block rounded-xl border border-ember-400/50 bg-pine-800 px-4 py-3 text-lg font-bold text-ember-300">
                 {result.action}

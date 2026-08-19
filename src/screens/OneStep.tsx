@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useApp } from "../state/store";
 import { Btn, Icon, Live } from "../components/ui";
-import { currentAction } from "../engine/localEngine";
+import { STRATEGY_LABEL } from "../engine/localEngine";
 
 /** One-Tap Start — one action, one button, zero decisions. */
 export default function OneStep() {
@@ -13,7 +13,7 @@ export default function OneStep() {
   }, [draft, dispatch]);
   if (!draft) return null;
 
-  const action = currentAction(draft.domain, draft.level, 0, draft.override, draft.ladderOverride);
+  const action = draft.override ?? "Take one small physical move.";
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col px-5 pb-16 pt-12 sm:pt-20">
@@ -23,7 +23,12 @@ export default function OneStep() {
           className="h-2.5 w-2.5 rounded-full bg-ember-400"
           style={{ animation: "breathe 2.6s ease-in-out infinite" }}
         />
-        <p className="kicker anim-fadeUp text-ember-400">{draft.note ?? "one tiny step"}</p>
+        <p className="kicker anim-fadeUp text-ember-400">
+          {draft.note ?? "one tiny step"}
+          {draft.strategy && (
+            <span className="ml-2 text-[9px] text-mint-400">· {STRATEGY_LABEL[draft.strategy]}</span>
+          )}
+        </p>
       </div>
 
       <h2

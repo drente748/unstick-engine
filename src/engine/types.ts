@@ -1,19 +1,56 @@
-/* Core domain types for the Task Initiation Engine and app state. */
+/* ============================================================
+   Engine + app domain types.
+   The engine is staged: analysis → barrier → strategies →
+   selection (with repetition memory) → generation → learning.
+   ============================================================ */
 
-export type Domain =
-  | "cleaning"
+/** Coarse task structure — what KIND of thing this is. */
+export type Structure =
+  | "prep"
   | "writing"
-  | "studying"
-  | "email"
-  | "admin"
-  | "code"
-  | "health"
-  | "calls"
-  | "creative"
+  | "research"
+  | "communication"
+  | "cleaning"
+  | "deciding"
+  | "learning"
+  | "creating"
+  | "errand"
+  | "fixing"
+  | "organizing"
+  | "project"
   | "generic";
+
+/** The ten initiation strategy categories. */
+export type StrategyId =
+  | "physical"
+  | "info"
+  | "decision"
+  | "tiny"
+  | "timebox"
+  | "permission"
+  | "visual"
+  | "social"
+  | "question"
+  | "direct";
+
+/** What is blocking the user right now. */
+export type Barrier =
+  | "overwhelmed"
+  | "unclear"
+  | "boring"
+  | "perfectionism"
+  | "anxiety"
+  | "distracted"
+  | "tired"
+  | "avoiding"
+  | "unknown";
+
+/** Explicit lightweight feedback after an attempted step. */
+export type FeedbackKind = "worked" | "tooBig" | "stuck" | "irrelevant";
 
 export type Difficulty = "easy" | "abit" | "hard" | "impossible";
 
+/** Legacy rescue-mode reasons (mapped onto barriers by the engine). */
 export type StuckReason =
   | "unknown-next"
   | "too-big"
@@ -24,26 +61,7 @@ export type StuckReason =
   | "dont-want"
   | "dont-know";
 
-/** Pre-start state check: what is blocking initiation right now. */
-export type Blocker =
-  | "too-big"
-  | "unclear"
-  | "boring"
-  | "perfectionism"
-  | "anxiety"
-  | "distracted"
-  | "tired"
-  | "avoiding"
-  | "dont-know";
-
-export type EntryKind =
-  | "normal"
-  | "ten"
-  | "shrinker"
-  | "overwhelm"
-  | "onetap"
-  | "statecheck"
-  | "recover";
+export type EntryKind = "normal" | "ten" | "shrinker" | "overwhelm" | "onetap" | "statecheck" | "recover";
 
 export type SessionKind = "focus" | "ten" | "micro";
 
@@ -51,53 +69,86 @@ export type Outcome = "kept" | "stopped" | "stuck";
 
 export type ThemeId = "pine" | "dawn" | "rain";
 
-export interface RescueResult {
-  message: string;
-  /** A replacement action, if the strategy changes the current step. */
-  action?: string;
-  /** A new shrink level, if the strategy shrinks the task. */
-  level?: number;
-  /** True when the strategy is a 60-second attention reset. */
-  reset?: boolean;
+/* ---------------- task analysis ---------------- */
+
+export interface TaskSignals {
+  multiPart: boolean;
+  bigScope: boolean;
+  vague: boolean;
+  hasDeadline: boolean;
 }
 
-/** Intervention chosen by the “Why can't I start?” state check. */
-export interface Intervention {
-  headline: string;
-  action: string;
-  reset?: boolean;
-  levelShift: number;
-}
-
-export interface Draft {
+export interface TaskAnalysis {
+  /** Original (trimmed, capped) task text. */
   title: string;
-  domain: Domain;
-  /** 0 original … 4 the floor. */
-  level: number;
-  stepIndex: number;
-  stepsDone: number;
-  rescues: number;
-  /** 0 until the first start of the current attempt. */
-  startedAt: number;
-  sessionId: string | null;
-  kind: SessionKind;
-  /** Overrides the current action (rescue strategies, AI ladders, plans). */
-  override: string | null;
-  ladderOverride: string[] | null;
-  /** How the current attempt entered the system. */
-  entry: EntryKind;
-  /** Blocker named in the state check, if any. */
-  blocker: Blocker | null;
-  /** Last rescue strategy applied — feeds the personal profile. */
-  lastStrategy: StuckReason | null;
-  /** Short human rationale shown above the next action. */
+  structure: Structure;
+  /** Base verb if a known one was found ("write"). */
+  verb: string | null;
+  /** Safe gerund/noun form for templates ("writing", "a reply"). */
+  verbPhrase: string | null;
+  /** The concrete object phrase ("the report", "my taxes"). */
+  object: string;
+  place: string | null;
+  tool: string | null;
+  person: string | null;
+  /** 0..3 — how large/abstract the ask is. */
+  complexity: number;
+  signals: TaskSignals;
+}
+
+/* ---------------- engine runtime ---------------- */
+
+/** Anti-repetition memory for the current attempt chain. */
+export interface EngineMemory {
+  /** Normalized action texts already shown (capped). */
+  shown: string[];
+  /** Strategy ids already used (capped). */
+  strategies: StrategyId[];
+  /** Strategies that were followed by negative feedback. */
+  failed: StrategyId[];
+}
+
+export interface EngineResult {
+  action: string;
+  strategy: StrategyId;
+  size: number;
   note: string | null;
+}
+
+export interface PreviewStep {
+  action: string;
+  strategy: StrategyId;
+  size: number;
+}
+
+export interface PlanInput {
+  title: string;
+  barrier?: Barrier | null;
+  size?: number | null;
+  durationSec?: number | null;
+  profile?: Profile | null;
+}
+
+/* ---------------- persistence ---------------- */
+
+export interface Profile {
+  starts: number;
+  kept: number;
+  /** Step size that most often led to momentum. */
+  bestSize: number | null;
+  /** Session length that most often led to momentum. */
+  bestDuration: number | null;
+  bestStrategy: StrategyId | null;
+  commonBarrier: Barrier | null;
+  /** Seconds between naming a task and starting it, when it worked. */
+  avgTimeToStart: number | null;
+  confidence: "none" | "low" | "enough";
 }
 
 export interface SessionRecord {
   id: string;
   title: string | null;
-  domain: Domain;
+  structure: Structure;
   kind: SessionKind;
   startedAt: number;
   endedAt: number | null;
@@ -105,26 +156,40 @@ export interface SessionRecord {
   steps: number;
   rescues: number;
   outcome: Outcome | null;
-  /** Step size used (shrink level). Added for adaptive learning. */
-  level?: number;
-  /** Chosen session length in seconds. */
-  duration?: number;
-  /** How this session was entered. */
-  entry?: EntryKind;
-  /** Named blocker, if the state check ran. */
-  blocker?: Blocker | null;
-  /** Rescue strategy that preceded the outcome, if any. */
-  strategy?: StuckReason | null;
+  /** Adaptive step size used (0..4). */
+  size: number;
+  /** Planned session length in seconds. */
+  duration: number;
+  entry: EntryKind;
+  barrier: Barrier | null;
+  strategy: StrategyId | null;
+  /** Seconds from task entry to first start (null if unknown). */
+  timeToStart: number | null;
 }
 
-/** Patterns learned locally from the user's own sessions. */
-export interface Profile {
-  starts: number;
-  bestLevel: number | null;
-  bestDuration: number | null;
-  bestStrategy: StuckReason | null;
-  commonBlocker: Blocker | null;
-  confidence: "none" | "low" | "enough";
+export interface Draft {
+  title: string;
+  analysis: TaskAnalysis;
+  /** Adaptive step size: 0 full … 4 the floor. */
+  level: number;
+  stepIndex: number;
+  stepsDone: number;
+  rescues: number;
+  feedbacks: number;
+  startedAt: number;
+  enteredAt: number;
+  sessionId: string | null;
+  kind: SessionKind;
+  /** The current single action (engine always keeps this set). */
+  override: string | null;
+  strategy: StrategyId | null;
+  note: string | null;
+  /** AI-provided ladder, if a remote engine was configured. */
+  ladderOverride: string[] | null;
+  entry: EntryKind;
+  blocker: Barrier | null;
+  lastFeedback: FeedbackKind | null;
+  memory: EngineMemory;
 }
 
 export interface Settings {
@@ -145,10 +210,10 @@ export type Screen =
   | { id: "shrinker" }
   | { id: "onestep" }
   | { id: "statecheck" }
-  | { id: "recover" }
   | { id: "focus"; durationSec: number; bodyDouble: boolean }
   | { id: "rescue" }
   | { id: "reset"; returnTo: "focus" | "shrinker" | "onestep" }
+  | { id: "recover" }
   | { id: "complete" }
   | { id: "overwhelm" }
   | { id: "progress" }

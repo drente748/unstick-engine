@@ -1,6 +1,6 @@
 import { useApp } from "../state/store";
 import { Btn, Icon } from "../components/ui";
-import { BLOCKER_LABEL, LEVEL_LABELS, STRATEGY_LABEL, durationLabel } from "../engine/localEngine";
+import { BLOCKER_LABEL, LEVEL_LABELS, STRATEGY_LABEL, durationLabel, secondsLabel } from "../engine/localEngine";
 
 function lastNDays(n: number): Date[] {
   const out: Date[] = [];
@@ -123,11 +123,19 @@ export default function Progress() {
           </p>
         ) : (
           <div className="mt-4 space-y-2.5">
-            {profile.bestLevel != null && (
+            {profile.bestSize != null && (
               <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
                 <span className="font-bold text-ink-mute">You start best from</span>
                 <span className="font-display text-base font-bold text-mint-300">
-                  {LEVEL_LABELS[profile.bestLevel]} steps
+                  {LEVEL_LABELS[profile.bestSize]} steps
+                </span>
+              </p>
+            )}
+            {profile.avgTimeToStart != null && (
+              <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="font-bold text-ink-mute">When it works, you cross the line in about</span>
+                <span className="font-display text-base font-bold text-mint-300">
+                  {secondsLabel(profile.avgTimeToStart)}
                 </span>
               </p>
             )}
@@ -147,10 +155,10 @@ export default function Progress() {
                 </span>
               </p>
             )}
-            {profile.commonBlocker && (
+            {profile.commonBarrier && (
               <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
                 <span className="font-bold text-ink-mute">Your usual blocker</span>
-                <span className="font-display text-base font-bold text-ink">{BLOCKER_LABEL[profile.commonBlocker]}</span>
+                <span className="font-display text-base font-bold text-ink">{BLOCKER_LABEL[profile.commonBarrier]}</span>
               </p>
             )}
             <p className="pt-2 text-xs text-ink-mute">

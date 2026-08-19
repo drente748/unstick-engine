@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useApp } from "../state/store";
 import { Btn, DurationPicker, Icon, Live } from "../components/ui";
-import { LEVEL_LABELS, buildLadder, minimumViable } from "../engine/localEngine";
+import { LEVEL_LABELS, STRATEGY_LABEL, minimumViable, previewSteps } from "../engine/localEngine";
 
 const TITLE_SIZES = [
   "clamp(1.9rem, 5vw, 3rem)",
@@ -28,7 +28,7 @@ export default function Shrinker() {
         setTimeout(() => setErr(false), 650);
         return;
       }
-      void submitTask(t, "shrinker", 1);
+      void submitTask(t, "shrinker");
     }
     return (
       <div className="mx-auto w-full max-w-xl px-5 pb-16 pt-12 sm:pt-20">
@@ -68,7 +68,8 @@ export default function Shrinker() {
     );
   }
 
-  const ladder = buildLadder(draft.domain, draft.level, draft.ladderOverride);
+  const preview = previewSteps(draft, profile);
+  const ladder = preview.map((p) => p.action);
   const atFloor = draft.level >= 4;
   const started = draft.startedAt > 0;
 
@@ -82,9 +83,9 @@ export default function Shrinker() {
           <span className="chip min-h-[30px] cursor-default py-1 text-xs text-butter-300">
             size: {LEVEL_LABELS[draft.level]}
           </span>
-          {profile.bestLevel != null && profile.confidence !== "none" && (
+          {profile.bestSize != null && profile.confidence !== "none" && (
             <span className="chip min-h-[30px] cursor-default border-mint-500/50 py-1 text-xs text-mint-300">
-              your sweet spot: {LEVEL_LABELS[profile.bestLevel]}
+              your sweet spot: {LEVEL_LABELS[profile.bestSize]}
             </span>
           )}
         </span>
@@ -145,7 +146,7 @@ export default function Shrinker() {
       </ol>
 
       <p className="anim-fadeUp mt-5 text-sm text-ink-mute">
-        Minimum viable version: <strong className="text-butter-300">{minimumViable(draft.domain)}</strong> — anything
+        Minimum viable version: <strong className="text-butter-300">{minimumViable(draft.analysis)}</strong> — anything
         beyond that is a bonus, not a requirement.
       </p>
 

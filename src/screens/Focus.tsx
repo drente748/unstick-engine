@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../state/store";
 import { Btn, Icon, Live, formatClock } from "../components/ui";
-import { currentAction } from "../engine/localEngine";
+import { STRATEGY_LABEL } from "../engine/localEngine";
 import { chime } from "../lib/persist";
 
 const DOUBLE_MSGS = ["Still here.", "One thing at a time.", "You're doing it.", "Keep going.", "No rush — just this."];
@@ -86,7 +86,7 @@ export default function Focus() {
 
   if (!draft || !screen) return null;
 
-  const action = currentAction(draft.domain, draft.level, draft.stepIndex, draft.override, draft.ladderOverride);
+  const action = draft.override ?? "Take one small physical move.";
   const total = Math.max(screen.durationSec, 1);
   const frac = remaining / total;
   const dashOffset = C * (1 - frac);
@@ -129,7 +129,12 @@ export default function Focus() {
 
       {/* the one action */}
       <div className="mt-9">
-        <p className="kicker">Your next tiny action</p>
+        <p className="kicker">
+          Your next tiny action
+          {draft.strategy && (
+            <span className="ml-2 text-[9px] text-mint-400">· {STRATEGY_LABEL[draft.strategy]}</span>
+          )}
+        </p>
         <p
           key={`${action}-${draft.stepIndex}`}
           className="font-display anim-pop mt-3 text-3xl font-extrabold leading-tight tracking-tight text-ink sm:text-[2.6rem]"

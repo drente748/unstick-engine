@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../state/store";
 import { Btn, Icon } from "../components/ui";
-import { currentAction } from "../engine/localEngine";
 
 /** Micro Start Mode — for when starting feels impossible. */
 export default function Micro() {
@@ -14,7 +13,7 @@ export default function Micro() {
   }, [draft, dispatch]);
   if (!draft) return null;
 
-  const tiny = currentAction(draft.domain, 3, 0, null, draft.ladderOverride);
+  const tiny = draft.override ?? "Just open it. Nothing else.";
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col px-5 pb-16 pt-14 sm:pt-24">
