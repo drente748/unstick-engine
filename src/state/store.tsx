@@ -27,6 +27,7 @@ import {
   advanceStep,
   analyzeTask,
   barrierIntervention,
+  buildRecoveryStrategy,
   computeProfile,
   emptyMemory,
   planFirstStep,
@@ -391,7 +392,7 @@ function reducer(state: State, a: Action): State {
     case "restartSmaller": {
       if (!state.draft) return { ...state, screen: { id: "home" } };
       const base: Draft = { ...state.draft, entry: "recover" };
-      const res = adaptFromFeedback(base, profile, "tooBig");
+      const res = buildRecoveryStrategy(base, profile, "tooBig");
       return {
         ...state,
         draft: {
@@ -411,7 +412,7 @@ function reducer(state: State, a: Action): State {
 
     case "recover": {
       if (!state.draft) return { ...state, screen: { id: "home" } };
-      const res = adaptFromFeedback(state.draft, profile, "tooBig");
+      const res = buildRecoveryStrategy(state.draft, profile, "drifted");
       return {
         ...state,
         draft: {

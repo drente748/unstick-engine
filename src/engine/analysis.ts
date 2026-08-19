@@ -1,10 +1,11 @@
-import type { Structure, TaskAnalysis, TaskSignals } from "./types";
+import type { Barrier, BarrierKind, Capacity, Structure, TaskAnalysis } from "./types";
 
 /* ============================================================
-   Stage 1 — Task understanding.
-   Extracts real context from the user's words instead of only
-   matching domains: verb, object, place, tool, person, structure
-   and a complexity score. Everything here is deterministic.
+   Stages 1–5 of the pipeline: normalize → classify →
+   complexity → friction → barrier hypothesis → capacity.
+   Pure, deterministic task understanding. The goal is not to
+   label the task "correctly" but to extract every signal that
+   changes what a good FIRST move looks like.
    ============================================================ */
 
 const VERBS: Record<string, string> = {
@@ -43,7 +44,7 @@ const TOOLS = [
   "app", "website", "site", "form", "file", "folder", "browser", "phone", "laptop", "computer",
   "spreadsheet", "slides", "canvas", "figma", "vscode", "editor", "terminal", "calendar",
   "portal", "account", "dashboard", "notebook", "textbook", "notes", "camera", "guitar",
-  "piano", "sketchbook", "repo", "codebase", "printer", " sewing machine", "banking",
+  "piano", "sketchbook", "repo", "codebase", "printer", "sewing machine", "banking",
 ];
 
 const PEOPLE = [
@@ -72,8 +73,18 @@ const PROJECT_WORDS = ["project", "website", "web site", "app", "business", "sta
 const VAGUE_WORDS = ["stuff", "things", "thing", "everything", "my life", "somehow", "somewhere", "whatever", "it all"];
 const BIG_WORDS = ["entire", "whole", "all ", "every", "complete", "everything", "whole house", "from scratch", "all of"];
 const DEADLINE_WORDS = ["today", "tonight", "tomorrow", "deadline", "due", "asap", "urgent", "this week", "friday", "monday", "sunday", "morning", "evening"];
+const PHYSICAL_WORDS = ["clean", "tidy", "walk", "run", "gym", "laundry", "dishes", "pack", "move", "cook", "stretch", "exercise", "vacuum", "garden", "paint", "repair", "fix", "groceries", "store"];
+const DIGITAL_WORDS = ["email", "inbox", "doc", "document", "file", "website", "site", "app", "form", "code", "codebase", "repo", "spreadsheet", "excel", "notion", "slides", "portal", "account", "blog", "article", "text", "message", "slack", "online"];
+const APP_WORDS = ["email", "inbox", "doc", "document", "file", "website", "site", "app", "form", "code", "codebase", "repo", "spreadsheet", "excel", "notion", "slides", "portal", "account", "calendar", "banking", "browser", "editor", "vscode"];
+const STAKE_WORDS = ["exam", "test", "interview", "boss", "client", "taxes", "tax", "deadline", "due", "urgent", "important", "presentation", "thesis", "visa", "contract", "rent"];
+const FIRSTSTEP_WORDS = ["open", "call", "email", "text", "walk", "stand", "sit", "grab", "put on", "pick up", "find", "check"];
 
-const tokenize = (s: string): string[] =>
+/** Stage 1 — normalize: trim, cap, de-quote, collapse whitespace. */
+export function normalizeTask(raw: string): string {
+  return raw.replace(/^[\s"'“”`]+|[\s"'“”`]+$/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+export const tokenize = (s: string): string[] =>
   s
     .toLowerCase()
     .replace(/[’']/g, "")
@@ -89,7 +100,8 @@ function findFirst(words: string[], list: string[]): string | null {
   return null;
 }
 
-function detectStructure(words: string[], title: string): Structure {
+/** Stage 2 — classify the task structure from its own words. */
+export function classifyTask(words: string[], title: string): Structure {
   const joined = words.join(" ");
   let best: Structure = "generic";
   let bestScore = 0;
@@ -146,41 +158,167 @@ function extractObject(title: string, words: string[], verb: string | null): str
   return startsWithThe ? phrase : `the ${phrase}`;
 }
 
-/** Stage 1 entry point: understand a task from its own words. */
+const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
+
+/** Stages 3–4 — complexity, friction and everything that shapes initiation. */
 export function analyzeTask(rawTitle: string): TaskAnalysis {
-  const title = rawTitle.trim().slice(0, 120);
+  const title = normalizeTask(rawTitle);
   const words = tokenize(title);
   const v = extractVerb(words);
   const lower = title.toLowerCase();
 
-  const signals: TaskSignals = {
-    multiPart: /\band\b|,|;/.test(lower) || words.length > 9,
-    bigScope: BIG_WORDS.some((b) => lower.includes(b)),
-    vague: VAGUE_WORDS.some((b) => lower.includes(b)),
-    hasDeadline: DEADLINE_WORDS.some((b) => lower.includes(b)),
-  };
+  const multiPart = /\band\b|,|;/.test(lower) || words.length > 9;
+  const scopeWord = BIG_WORDS.find((b) => lower.includes(b)) ?? null;
+  const vague = VAGUE_WORDS.some((b) => lower.includes(b));
+  const hasDeadline = DEADLINE_WORDS.some((b) => lower.includes(b));
 
+  const actionCount = Math.min(3, (lower.match(/\band\b|,/g) ?? []).length + (words.length > 9 ? 1 : 0));
+  const dependencies = Math.min(
+    3,
+    (["before", "after", "once", "when", "waiting", "need"].filter((d) => lower.includes(d)).length +
+      (multiPart ? 1 : 0)),
+  );
+  const digital = DIGITAL_WORDS.some((d) => lower.includes(d));
+  const physical = PHYSICAL_WORDS.some((p) => words.includes(p));
+  const needsApp = APP_WORDS.some((p) => lower.includes(p));
+  const clearFirstStep = FIRSTSTEP_WORDS.some((f) => words[0] === f) || lower.includes("open ");
+  const stakes = STAKE_WORDS.filter((s) => lower.includes(s)).length;
+  const person = findFirst(words, PEOPLE);
+
+  /* effort: length of ask + scope + structure hints */
+  let effort = words.length > 7 ? 1 : 0;
+  if (scopeWord) effort += 1;
+  if (["project", "organizing", "cleaning", "research"].includes(classifyTask(words, title))) effort += 1;
+  effort = Math.min(3, effort);
+
+  /* complexity: how big/abstract the ask is */
+  const STRONG_SCOPE = ["entire", "whole", "all of", "everything", "from scratch", "complete", "whole house"];
   let complexity = 0;
-  if (signals.multiPart) complexity += 1;
-  if (signals.bigScope || signals.vague) complexity += 1;
+  if (multiPart) complexity += 1;
+  if (scopeWord || vague) complexity += 1;
   if (words.length > 8 || PROJECT_WORDS.some((p) => lower.includes(p))) complexity += 1;
+  if (scopeWord && STRONG_SCOPE.includes(scopeWord.trim())) complexity += 1;
   complexity = Math.min(3, complexity);
 
-  const structure = detectStructure(words, title);
+  /* ambiguity: would a stranger know the first physical move? */
+  let ambiguity = 0.15;
+  if (vague) ambiguity += 0.45;
+  if (!v) ambiguity += 0.2;
+  if (complexity >= 2) ambiguity += 0.15;
+  if (clearFirstStep) ambiguity -= 0.25;
+  ambiguity = clamp01(ambiguity);
+
+  const uncertainty = clamp01(ambiguity * 0.6 + (clearFirstStep ? 0 : 0.2) + dependencies * 0.08);
+  const emotionalFriction = clamp01(stakes * 0.22 + (person ? 0.12 : 0) + (scopeWord ? 0.15 : 0) + (vague ? 0.1 : 0));
+  const avoidanceTriggers =
+    (scopeWord ? 1 : 0) + (vague ? 1 : 0) + (hasDeadline ? 1 : 0) + (person ? 1 : 0) + (stakes > 0 ? 1 : 0);
 
   return {
     title,
-    structure,
+    structure: classifyTask(words, title),
     verb: v?.verb ?? null,
     verbPhrase: v?.phrase ?? null,
     object: extractObject(title, words, v?.verb ?? null),
     place: findFirst(words, PLACES),
     tool: findFirst(words, TOOLS),
-    person: findFirst(words, PEOPLE),
+    person,
     complexity,
-    signals,
+    ambiguity,
+    effort,
+    actionCount,
+    dependencies,
+    physical,
+    digital,
+    needsApp,
+    clearFirstStep,
+    emotionalFriction,
+    uncertainty,
+    avoidanceTriggers,
+    scopeWord,
   };
 }
+
+/* ---------------- barrier hypothesis ---------------- */
+
+export interface BarrierHypothesis {
+  barrier: Barrier;
+  kind: BarrierKind;
+  /** Internal one-liner: why this hypothesis. */
+  reason: string;
+}
+
+const TASK_SIDE: Barrier[] = ["unclear", "overwhelmed"];
+
+/**
+ * Stage 5 — reason about WHY the user is stuck.
+ * A user-named barrier wins. Otherwise the task's own signals
+ * suggest the most likely one — and we separate TASK problems
+ * (fix by clarifying/decomposing) from STARTING problems (fix by
+ * cutting initiation friction).
+ */
+export function diagnoseBarrier(a: TaskAnalysis, named: Barrier | null): BarrierHypothesis {
+  if (named) {
+    return {
+      barrier: named,
+      kind: TASK_SIDE.includes(named) ? "task" : "starting",
+      reason: named === "unknown" ? "user reports a block without a name" : `user named the barrier: ${named}`,
+    };
+  }
+  if (a.ambiguity >= 0.55 && a.actionCount === 0) {
+    return { barrier: "unclear", kind: "task", reason: "wording lacks a visible first move" };
+  }
+  if (a.complexity >= 2 || a.actionCount >= 2) {
+    return { barrier: "overwhelmed", kind: "task", reason: "the ask contains several tasks in one" };
+  }
+  if (a.emotionalFriction >= 0.45) {
+    return { barrier: "anxiety", kind: "starting", reason: "high stakes detected in the wording" };
+  }
+  if (a.avoidanceTriggers >= 3) {
+    return { barrier: "avoiding", kind: "starting", reason: "multiple classic avoidance triggers present" };
+  }
+  return { barrier: "unknown", kind: "starting", reason: "no strong signal — assume friction, not confusion" };
+}
+
+/* ---------------- capacity ---------------- */
+
+/**
+ * Stage 6 — estimate current initiation capacity from observable
+ * signals only: time of day, named energy barriers, and recent
+ * momentum. Never infers character or motivation.
+ */
+export function estimateCapacity(
+  hour: number,
+  barrier: Barrier | null,
+  momentum: "hot" | "warm" | "cold" | "none",
+): Capacity {
+  let energy = 0.75;
+  const reasons: string[] = [];
+  if (hour >= 22 || hour < 6) {
+    energy -= 0.25;
+    reasons.push("late hour");
+  } else if (hour >= 13 && hour < 16) {
+    energy -= 0.1;
+    reasons.push("post-lunch dip");
+  }
+  if (barrier === "tired") {
+    energy -= 0.3;
+    reasons.push("user reports tiredness");
+  }
+  if (barrier === "distracted") {
+    energy -= 0.1;
+    reasons.push("attention wandering");
+  }
+  if (momentum === "hot") {
+    energy += 0.15;
+    reasons.push("recent momentum");
+  } else if (momentum === "cold") {
+    energy -= 0.1;
+    reasons.push("recent attempts stalled");
+  }
+  return { energy: clamp01(energy), reason: reasons.length ? reasons.join(", ") : "baseline" };
+}
+
+/* ---------------- deterministic variety ---------------- */
 
 /** Stable 32-bit hash — drives deterministic variety. */
 export function hashStr(s: string): number {

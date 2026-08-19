@@ -1,12 +1,15 @@
 import { hashStr, pick } from "./analysis";
-import type { Barrier, Structure, StrategyId, TaskAnalysis } from "./types";
+import type { Barrier, CostVector, Structure, StrategyId, TaskAnalysis } from "./types";
 
 /* ============================================================
-   Stage 2 — Initiation strategies.
+   Stage 7 — Initiation strategies & candidate generation.
    Ten categories, each expressed as template slots with several
    wording variants. Templates read the task's own extracted
    context (object / tool / place / person), so the same strategy
    says different things for different tasks.
+
+   On top of wording, every strategy carries a BASE cost profile
+   that the selector refines with the task's measured signals.
    ============================================================ */
 
 interface Slots {
@@ -26,7 +29,7 @@ function slotsFor(a: TaskAnalysis): Slots {
   return {
     o: a.object,
     t: a.tool ? (a.tool.startsWith("the ") || a.tool.startsWith("my ") ? a.tool : `the ${a.tool}`) : a.object,
-    p: a.place ? (a.place.startsWith("the ") || a.place.startsWith("my ") ? a.place : `the ${a.place}`) : "the spot where it happens",
+    p: a.place ? (a.place.startsWith("the ") || a.place.startsWith("my ") ? a.place : "the spot where it happens") : "the spot where it happens",
     v: a.verbPhrase ?? "the first bit",
     who: a.person ? (a.person.startsWith("my ") || a.person.startsWith("the ") ? a.person : `your ${a.person}`) : null,
   };
@@ -39,6 +42,15 @@ export interface StrategyDef {
   label: string;
   /** Typical size band this strategy serves (0..4). */
   sizes: [number, number];
+  /**
+   * Base cost profile (each 0..1) BEFORE task signals adjust it.
+   * progress   = real task-state change per attempt
+   * effort     = physical/time work
+   * initiation = activation energy (opening things, moving)
+   * cognitive  = decisions/thinking demanded
+   * emotional  = how close it gets to the scary part
+   */
+  base: Pick<CostVector, "progress" | "effort" | "initiation" | "cognitive" | "emotional">;
   templates: Template[];
 }
 
@@ -47,6 +59,7 @@ export const STRATEGIES: StrategyDef[] = [
     id: "physical",
     label: "physical start",
     sizes: [0, 3],
+    base: { progress: 0.45, effort: 0.35, initiation: 0.2, cognitive: 0.1, emotional: 0.15 },
     templates: [
       (s) => `Stand up and walk to ${s.p}. Nothing else.`,
       (s) => `Clear a hand-sized space near ${s.p} — that's the whole move.`,
@@ -59,6 +72,7 @@ export const STRATEGIES: StrategyDef[] = [
     id: "info",
     label: "information start",
     sizes: [1, 3],
+    base: { progress: 0.55, effort: 0.25, initiation: 0.35, cognitive: 0.35, emotional: 0.15 },
     templates: [
       (s) => `Open ${s.t} and only read what's already there.`,
       (s) => `Find ONE example of a finished ${s.o.replace(/^the /, "")}. Just look at it.`,
@@ -71,6 +85,7 @@ export const STRATEGIES: StrategyDef[] = [
     id: "decision",
     label: "decision-reduction start",
     sizes: [1, 3],
+    base: { progress: 0.6, effort: 0.2, initiation: 0.25, cognitive: 0.45, emotional: 0.2 },
     templates: [
       (s) => `Make the first decision about ${s.o} in 10 seconds — any option that isn't terrible.`,
       (s) => `Write the ONE choice blocking ${s.o}, then pick either side. Wrong is fine; it moves.`,
@@ -82,6 +97,7 @@ export const STRATEGIES: StrategyDef[] = [
     id: "tiny",
     label: "ridiculously small start",
     sizes: [2, 4],
+    base: { progress: 0.35, effort: 0.08, initiation: 0.08, cognitive: 0.08, emotional: 0.08 },
     templates: [
       (s) => `Do the 30-second version of ${s.o}. Stop when the half-minute is up.`,
       (s) => `One single unit of ${s.o} — one line, one item, one click. That's the whole task.`,
@@ -94,6 +110,7 @@ export const STRATEGIES: StrategyDef[] = [
     id: "timebox",
     label: "time-boxed start",
     sizes: [0, 2],
+    base: { progress: 0.5, effort: 0.3, initiation: 0.2, cognitive: 0.15, emotional: 0.2 },
     templates: [
       (s) => `Set a 2-minute timer for ${s.o}. When it rings, stopping is allowed.`,
       (s) => `Work on ${s.o} until the next song ends.`,
@@ -105,6 +122,7 @@ export const STRATEGIES: StrategyDef[] = [
     id: "permission",
     label: "permission-to-be-bad start",
     sizes: [1, 3],
+    base: { progress: 0.55, effort: 0.25, initiation: 0.2, cognitive: 0.2, emotional: 0.05 },
     templates: [
       (s) => `Make the worst acceptable version of ${s.o}. Bad on purpose.`,
       (s) => `Do ${s.v} badly for 2 minutes. Quality is banned until tomorrow.`,
@@ -116,6 +134,7 @@ export const STRATEGIES: StrategyDef[] = [
     id: "visual",
     label: "visual setup start",
     sizes: [1, 3],
+    base: { progress: 0.4, effort: 0.15, initiation: 0.25, cognitive: 0.15, emotional: 0.1 },
     templates: [
       (s) => `Open ${s.t} and just look at it — no typing, no fixing, just looking.`,
       (s) => `Put everything about ${s.o} in front of you: tabs, papers, tools. Arrange nothing.`,
@@ -127,6 +146,7 @@ export const STRATEGIES: StrategyDef[] = [
     id: "social",
     label: "accountability start",
     sizes: [0, 2],
+    base: { progress: 0.45, effort: 0.15, initiation: 0.35, cognitive: 0.1, emotional: 0.3 },
     templates: [
       (s) =>
         s.who
@@ -141,6 +161,7 @@ export const STRATEGIES: StrategyDef[] = [
     id: "question",
     label: "question start",
     sizes: [1, 3],
+    base: { progress: 0.5, effort: 0.12, initiation: 0.15, cognitive: 0.4, emotional: 0.1 },
     templates: [
       (s) => `Ask out loud: what's the very first physical move on ${s.o}? Do only that move.`,
       (s) => `Ask: where does ${s.o} actually live? Go there and stand in that spot.`,
@@ -152,6 +173,7 @@ export const STRATEGIES: StrategyDef[] = [
     id: "direct",
     label: "direct action start",
     sizes: [0, 1],
+    base: { progress: 0.8, effort: 0.5, initiation: 0.45, cognitive: 0.3, emotional: 0.35 },
     templates: [
       (s) => `Do the first 2 minutes of ${s.o} — roughly, right now.`,
       (s) => `Start ${s.v} immediately, one rough unit only.`,
@@ -209,4 +231,67 @@ export function renderStrategy(id: StrategyId, a: TaskAnalysis, salt: number): s
   const slots = slotsFor(a);
   const tpl = pick(def.templates, hashStr(`${a.title}|${id}|${salt}`));
   return tpl(slots);
+}
+
+/* ---------------- task-scoped decomposition ----------------
+   The ladder generator: progressive, MEANINGFUL reductions that
+   stay specific to this task (scope → piece → unit → doorway),
+   instead of a fixed phrase per level.
+   ---------------------------------------------------------- */
+
+/** The smallest addressable unit per structure ("a line", "one item"…). */
+const UNIT: Record<Structure, string> = {
+  prep: "one thing you'll need",
+  writing: "one sentence",
+  research: "one source",
+  communication: "one short message",
+  cleaning: "one object",
+  deciding: "one option",
+  learning: "one paragraph",
+  creating: "one mark",
+  errand: "the first stop",
+  fixing: "the first symptom",
+  organizing: "one drawer or folder",
+  project: "the first piece",
+  generic: "one small unit",
+};
+
+/** Where the task lives, per structure — the "doorway". */
+function doorway(a: TaskAnalysis): string {
+  if (a.tool) return a.tool.startsWith("the ") || a.tool.startsWith("my ") ? a.tool : `the ${a.tool}`;
+  if (a.place) return a.place.startsWith("the ") || a.place.startsWith("my ") ? a.place : `the ${a.place}`;
+  if (a.needsApp) return "the app it lives in";
+  if (a.physical) return "the spot where it happens";
+  return "the file, page or place it lives in";
+}
+
+const short = (s: string): string => s.replace(/^the /, "");
+
+/**
+ * A rung of the dynamic ladder for a given size.
+ * size 0 = scoped real start, 1 = one piece, 2 = one unit,
+ * 3 = doorway (open/touch), 4 = approach (body only).
+ * Always physically executable; always about THIS task.
+ */
+export function decompose(a: TaskAnalysis, size: number): string {
+  const o = short(a.object);
+  const unit = UNIT[a.structure];
+  const d = doorway(a);
+  const s = Math.max(0, Math.min(4, size));
+  switch (s) {
+    case 0:
+      if (a.scopeWord) return `Do one bounded part of ${a.object} — ignore the rest today.`;
+      if (a.actionCount >= 2) return `Do only the first of those things: the rest doesn't exist yet.`;
+      return `Do the first 2 minutes of ${a.object} — roughly, right now.`;
+    case 1:
+      return `Shrink it: one piece of ${o}. Which piece? The one you already know.`;
+    case 2:
+      return `Even smaller: ${unit} of ${o}. Stop right after.`;
+    case 3:
+      return a.digital || a.needsApp ? `Just open ${d}. Nothing else counts.` : `Just touch or face ${d}. Nothing else counts.`;
+    default:
+      return a.place
+        ? `Walk to the ${a.place}. Standing there is the whole step.`
+        : `Stand up and take one step toward where ${o} happens.`;
+  }
 }

@@ -1,7 +1,15 @@
 /* ============================================================
    Engine + app domain types.
-   The engine is staged: analysis → barrier → strategies →
-   selection (with repetition memory) → generation → learning.
+
+   The engine is an explicit reasoning pipeline:
+   normalize → classify → complexity → friction → barrier
+   hypothesis → capacity → size → candidates → score →
+   guardrails → dedupe → select → explain → learn → profile.
+
+   Every stage is a small pure function. The only source of
+   truth for learning is the persisted SessionRecord list; the
+   Profile is always re-derived, never stored, so it can never
+   drift or explode after one event.
    ============================================================ */
 
 /** Coarse task structure — what KIND of thing this is. */
@@ -45,6 +53,9 @@ export type Barrier =
   | "avoiding"
   | "unknown";
 
+/** Is the problem in the TASK (needs clarification/decomposition) or in STARTING (needs friction reduction)? */
+export type BarrierKind = "task" | "starting" | "none";
+
 /** Explicit lightweight feedback after an attempted step. */
 export type FeedbackKind = "worked" | "tooBig" | "stuck" | "irrelevant";
 
@@ -69,17 +80,13 @@ export type Outcome = "kept" | "stopped" | "stuck";
 
 export type ThemeId = "pine" | "dawn" | "rain";
 
-/* ---------------- task analysis ---------------- */
+/** How sure the profile is about its own conclusions. */
+export type ConfidenceTier = "none" | "low" | "emerging" | "stable";
 
-export interface TaskSignals {
-  multiPart: boolean;
-  bigScope: boolean;
-  vague: boolean;
-  hasDeadline: boolean;
-}
+/* ---------------- task understanding ---------------- */
 
 export interface TaskAnalysis {
-  /** Original (trimmed, capped) task text. */
+  /** Normalized (trimmed, capped, de-quoted) task text. */
   title: string;
   structure: Structure;
   /** Base verb if a known one was found ("write"). */
@@ -93,19 +100,83 @@ export interface TaskAnalysis {
   person: string | null;
   /** 0..3 — how large/abstract the ask is. */
   complexity: number;
-  signals: TaskSignals;
+  /** 0..1 — how unclear the first move is from the wording alone. */
+  ambiguity: number;
+  /** 0..3 — estimated real-world effort. */
+  effort: number;
+  /** 0..3 — how many separate sub-actions the wording implies. */
+  actionCount: number;
+  /** 0..3 — how many prerequisites it seems to depend on. */
+  dependencies: number;
+  /** Involves moving the body / moving through space. */
+  physical: boolean;
+  /** Happens on a screen. */
+  digital: boolean;
+  /** Requires opening another application to even begin. */
+  needsApp: boolean;
+  /** The wording already contains an obvious first step. */
+  clearFirstStep: boolean;
+  /** 0..1 — likely emotional weight (fear, dread, stakes). */
+  emotionalFriction: number;
+  /** 0..1 — uncertainty about how or where to begin. */
+  uncertainty: number;
+  /** Count of classic avoidance triggers (big scope, vague, deadline, people). */
+  avoidanceTriggers: number;
+  /** The scope word that made it big ("entire", "all"…), if any. */
+  scopeWord: string | null;
 }
 
-/* ---------------- engine runtime ---------------- */
+/* ---------------- capacity ---------------- */
 
-/** Anti-repetition memory for the current attempt chain. */
-export interface EngineMemory {
-  /** Normalized action texts already shown (capped). */
-  shown: string[];
-  /** Strategy ids already used (capped). */
-  strategies: StrategyId[];
-  /** Strategies that were followed by negative feedback. */
-  failed: StrategyId[];
+/** The user's current ability to initiate — inferred, never judged. */
+export interface Capacity {
+  /** 0..1 — available initiation energy right now. */
+  energy: number;
+  /** Why the estimate landed where it did (internal metadata). */
+  reason: string;
+}
+
+/* ---------------- candidates & scoring ---------------- */
+
+/**
+ * Normalized cost/benefit dimensions, each in [0, 1].
+ * Every dimension exists for a behavioral reason:
+ *  progress    — how much real task-state change this buys
+ *  effort      — physical/time work required
+ *  initiation  — activation energy to begin (open apps, find things)
+ *  ambiguity   — unclear wording or unclear how-to
+ *  cognitive   — decisions/thinking it demands
+ *  emotional   — dread/stakes it touches
+ *  dependencies— prerequisites that must hold first
+ *  confidence  — engine's belief it can be executed as written
+ */
+export interface CostVector {
+  progress: number;
+  effort: number;
+  initiation: number;
+  ambiguity: number;
+  cognitive: number;
+  emotional: number;
+  dependencies: number;
+  confidence: number;
+}
+
+export interface CandidateAction {
+  action: string;
+  strategy: StrategyId;
+  size: number;
+  costs: CostVector;
+  source: "template" | "decompose" | "fallback";
+}
+
+/** Concise, non-private decision metadata (safe for UI exposure). */
+export interface DecisionMeta {
+  /** One line: why this action, this size, this strategy. */
+  reason: string;
+  /** 0..1 engine confidence the user can execute this now. */
+  confidence: number;
+  expectedEffort: "tiny" | "small" | "medium";
+  barrierKind: BarrierKind;
 }
 
 export interface EngineResult {
@@ -115,21 +186,44 @@ export interface EngineResult {
   note: string | null;
 }
 
+export type Decision = EngineResult & DecisionMeta;
+
 export interface PreviewStep {
   action: string;
   strategy: StrategyId;
   size: number;
 }
 
-export interface PlanInput {
-  title: string;
-  barrier?: Barrier | null;
-  size?: number | null;
-  durationSec?: number | null;
-  profile?: Profile | null;
+/* ---------------- engine runtime ---------------- */
+
+interface SizeTrack {
+  size: number;
+  /** Consecutive positive outcomes at that size. */
+  worked: number;
+  /** Consecutive negative outcomes at that size. */
+  failed: number;
+}
+
+/** Anti-repetition + adaptation memory for the current attempt chain. */
+export interface EngineMemory {
+  /** Normalized action texts already shown (capped). */
+  shown: string[];
+  /** Strategy ids already used (capped). */
+  strategies: StrategyId[];
+  /** Strategies that were followed by negative feedback. */
+  failed: StrategyId[];
+  /** Normalized actions followed by negative feedback, with counts. */
+  failedActions: Array<{ k: string; n: number }>;
+  /** Hysteresis for size adaptation (prevents oscillation). */
+  sizeTrack: SizeTrack;
 }
 
 /* ---------------- persistence ---------------- */
+
+export interface Rate {
+  kept: number;
+  total: number;
+}
 
 export interface Profile {
   starts: number;
@@ -140,9 +234,21 @@ export interface Profile {
   bestDuration: number | null;
   bestStrategy: StrategyId | null;
   commonBarrier: Barrier | null;
+  /** Barriers seen ≥3 times — recurring patterns, not one-offs. */
+  repeatedBarriers: Barrier[];
   /** Seconds between naming a task and starting it, when it worked. */
   avgTimeToStart: number | null;
-  confidence: "none" | "low" | "enough";
+  /** Momentum over the last few sessions. */
+  momentum: "hot" | "warm" | "cold" | "none";
+  /** Success rate of sessions that needed a rescue (0..1). */
+  recoveryRate: number | null;
+  /** Completion rates by size / structure / barrier (sample-guarded). */
+  rates: {
+    size: Record<string, Rate>;
+    structure: Record<string, Rate>;
+    barrier: Record<string, Rate>;
+  } | null;
+  confidence: ConfidenceTier;
 }
 
 export interface SessionRecord {
@@ -190,6 +296,8 @@ export interface Draft {
   blocker: Barrier | null;
   lastFeedback: FeedbackKind | null;
   memory: EngineMemory;
+  /** Latest decision metadata (internal; not required by screens). */
+  decision?: DecisionMeta | null;
 }
 
 export interface Settings {
