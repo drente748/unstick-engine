@@ -79,12 +79,15 @@ export default function StateCheck() {
           <button
             key={b.v}
             type="button"
-            className="card anim-fadeUp flex items-center gap-3.5 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-clay-400/70 hover:bg-pine-800"
+            className="card anim-fadeUp group flex items-start gap-3.5 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-clay-400/70 hover:bg-pine-800"
             style={{ animationDelay: `${0.12 + i * 0.045}s` }}
             onClick={() => dispatch({ type: "answerBlocker", blocker: b.v })}
           >
-            <Icon n={b.icon} className="h-5 w-5 shrink-0 text-clay-300" />
-            <span className="font-bold text-ink-dim">{b.label}</span>
+            <Icon n={b.icon} className="mt-0.5 h-5 w-5 shrink-0 text-clay-300" />
+            <span className="min-w-0">
+              <span className="block font-bold text-ink-dim group-hover:text-ink">{b.label}</span>
+              <span className="mt-0.5 block text-xs text-ink-mute">→ {b.hint}</span>
+            </span>
           </button>
         ))}
       </div>

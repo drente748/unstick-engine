@@ -36,6 +36,24 @@ export default function OneStep() {
         Nothing else exists right now. “{draft.title}” can wait behind this one move.
       </p>
 
+      {/* perceptible step-size indicator */}
+      <div
+        className="anim-fadeUp mt-5 flex items-center gap-1.5"
+        style={{ animationDelay: "0.13s" }}
+        role="img"
+        aria-label={`Step size: level ${draft.level + 1} of 5 — ${["normal", "smaller", "tiny", "micro", "the floor"][draft.level]}`}
+      >
+        <span className="mr-1 text-[10px] font-bold uppercase tracking-widest text-ink-mute">size</span>
+        {[0, 1, 2, 3, 4].map((l) => (
+          <span
+            key={l}
+            className={`h-1.5 rounded-full transition-all duration-300 ${
+              l === draft.level ? "w-6 bg-ember-400" : l < draft.level ? "w-2.5 bg-ember-400/40" : "w-2.5 bg-pine-600"
+            }`}
+          />
+        ))}
+      </div>
+
       <div className="anim-fadeUp" style={{ animationDelay: "0.16s" }}>
         <Btn
           autoFocus

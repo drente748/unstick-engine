@@ -359,16 +359,16 @@ export const STRATEGY_LABEL: Record<StuckReason, string> = {
 
 /* ---------------- pre-start state check ---------------- */
 
-export const BLOCKERS: Array<{ v: Blocker; label: string; icon: string }> = [
-  { v: "too-big", label: "It feels too big", icon: "mountain" },
-  { v: "unclear", label: "It's unclear — I don't see the first move", icon: "fog" },
-  { v: "boring", label: "It's boring", icon: "zzz" },
-  { v: "perfectionism", label: "I want to do it perfectly", icon: "eye" },
-  { v: "anxiety", label: "I'm anxious I'll do it wrong", icon: "heart" },
-  { v: "distracted", label: "My attention keeps wandering", icon: "loop" },
-  { v: "tired", label: "I'm tired", icon: "battery" },
-  { v: "avoiding", label: "I keep avoiding it", icon: "door" },
-  { v: "dont-know", label: "I honestly don't know", icon: "question" },
+export const BLOCKERS: Array<{ v: Blocker; label: string; icon: string; hint: string }> = [
+  { v: "too-big", label: "It feels too big", icon: "mountain", hint: "we'll shrink it to one piece" },
+  { v: "unclear", label: "It's unclear — I don't see the first move", icon: "fog", hint: "we'll find one physical move" },
+  { v: "boring", label: "It's boring", icon: "zzz", hint: "a 10-second sprint beats boredom" },
+  { v: "perfectionism", label: "I want to do it perfectly", icon: "eye", hint: "we'll make the worst acceptable version" },
+  { v: "anxiety", label: "I'm anxious I'll do it wrong", icon: "heart", hint: "an intentionally imperfect first step" },
+  { v: "distracted", label: "My attention keeps wandering", icon: "loop", hint: "a 60-second attention reset" },
+  { v: "tired", label: "I'm tired", icon: "battery", hint: "the minimum viable version" },
+  { v: "avoiding", label: "I keep avoiding it", icon: "door", hint: "just open it — nothing more" },
+  { v: "dont-know", label: "I honestly don't know", icon: "question", hint: "that's fine — we'll go tiny" },
 ];
 
 export const BLOCKER_LABEL: Record<Blocker, string> = {
