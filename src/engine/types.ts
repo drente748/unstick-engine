@@ -24,11 +24,32 @@ export type StuckReason =
   | "dont-want"
   | "dont-know";
 
-export type EntryKind = "normal" | "ten" | "shrinker" | "overwhelm";
+/** Pre-start state check: what is blocking initiation right now. */
+export type Blocker =
+  | "too-big"
+  | "unclear"
+  | "boring"
+  | "perfectionism"
+  | "anxiety"
+  | "distracted"
+  | "tired"
+  | "avoiding"
+  | "dont-know";
+
+export type EntryKind =
+  | "normal"
+  | "ten"
+  | "shrinker"
+  | "overwhelm"
+  | "onetap"
+  | "statecheck"
+  | "recover";
 
 export type SessionKind = "focus" | "ten" | "micro";
 
 export type Outcome = "kept" | "stopped" | "stuck";
+
+export type ThemeId = "pine" | "dawn" | "rain";
 
 export interface RescueResult {
   message: string;
@@ -38,6 +59,14 @@ export interface RescueResult {
   level?: number;
   /** True when the strategy is a 60-second attention reset. */
   reset?: boolean;
+}
+
+/** Intervention chosen by the “Why can't I start?” state check. */
+export interface Intervention {
+  headline: string;
+  action: string;
+  reset?: boolean;
+  levelShift: number;
 }
 
 export interface Draft {
@@ -52,9 +81,17 @@ export interface Draft {
   startedAt: number;
   sessionId: string | null;
   kind: SessionKind;
-  /** Overrides the current action (rescue strategies, AI-provided ladders). */
+  /** Overrides the current action (rescue strategies, AI ladders, plans). */
   override: string | null;
   ladderOverride: string[] | null;
+  /** How the current attempt entered the system. */
+  entry: EntryKind;
+  /** Blocker named in the state check, if any. */
+  blocker: Blocker | null;
+  /** Last rescue strategy applied — feeds the personal profile. */
+  lastStrategy: StuckReason | null;
+  /** Short human rationale shown above the next action. */
+  note: string | null;
 }
 
 export interface SessionRecord {
@@ -68,9 +105,27 @@ export interface SessionRecord {
   steps: number;
   rescues: number;
   outcome: Outcome | null;
+  /** Step size used (shrink level). Added for adaptive learning. */
+  level?: number;
+  /** Chosen session length in seconds. */
+  duration?: number;
+  /** How this session was entered. */
+  entry?: EntryKind;
+  /** Named blocker, if the state check ran. */
+  blocker?: Blocker | null;
+  /** Rescue strategy that preceded the outcome, if any. */
+  strategy?: StuckReason | null;
 }
 
-export type ThemeId = "pine" | "dawn" | "rain";
+/** Patterns learned locally from the user's own sessions. */
+export interface Profile {
+  starts: number;
+  bestLevel: number | null;
+  bestDuration: number | null;
+  bestStrategy: StuckReason | null;
+  commonBlocker: Blocker | null;
+  confidence: "none" | "low" | "enough";
+}
 
 export interface Settings {
   theme: ThemeId;
@@ -88,9 +143,12 @@ export type Screen =
   | { id: "micro" }
   | { id: "quick" }
   | { id: "shrinker" }
+  | { id: "onestep" }
+  | { id: "statecheck" }
+  | { id: "recover" }
   | { id: "focus"; durationSec: number; bodyDouble: boolean }
   | { id: "rescue" }
-  | { id: "reset"; returnTo: "focus" | "shrinker" }
+  | { id: "reset"; returnTo: "focus" | "shrinker" | "onestep" }
   | { id: "complete" }
   | { id: "overwhelm" }
   | { id: "progress" }

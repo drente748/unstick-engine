@@ -21,6 +21,16 @@ export default function Focus() {
   const endedRef = useRef(false);
   const paused = state.paused;
   const soundOn = state.settings.sound;
+  const [, setTick] = useState(0);
+
+  /* while paused, notice long absences so the overlay can be kinder */
+  useEffect(() => {
+    if (!paused) return;
+    const iv = setInterval(() => setTick((t) => t + 1), 10000);
+    return () => clearInterval(iv);
+  }, [paused]);
+
+  const awayLong = paused && state.pausedAt != null && Date.now() - state.pausedAt > 45000;
   const bodyDouble = !!screen?.bodyDouble && state.settings.doubleMsgs;
 
   /* countdown */
@@ -181,11 +191,20 @@ export default function Focus() {
       {paused && (
         <div className="anim-fadeIn fixed inset-0 z-[60] flex items-center justify-center bg-pine-950/88 px-5 backdrop-blur-sm">
           <div className="card anim-pop w-full max-w-sm p-7 text-center">
-            <p className="font-display text-3xl font-extrabold text-ink">Paused.</p>
-            <p className="mt-2 text-ink-dim">The task isn't going anywhere. Neither are we.</p>
+            <p className="font-display text-3xl font-extrabold text-ink">
+              {awayLong ? "Been away? That's okay." : "Paused."}
+            </p>
+            <p className="mt-2 text-ink-dim">
+              {awayLong
+                ? "The thread is still here. One tiny move restarts it."
+                : "The task isn't going anywhere. Neither are we."}
+            </p>
             <div className="mt-6 space-y-2.5">
               <Btn variant="primary" className="w-full" onClick={() => dispatch({ type: "pause", value: false })}>
                 <Icon n="play" className="h-4 w-4" /> RESUME
+              </Btn>
+              <Btn variant="quiet" className="w-full" onClick={() => dispatch({ type: "recover" })}>
+                <Icon n="loop" className="h-4 w-4" /> LOST THE THREAD → SMALLEST NEXT STEP
               </Btn>
               <Btn variant="clay" className="w-full" onClick={() => dispatch({ type: "nav", screen: { id: "rescue" } })}>
                 <Icon n="lifebuoy" className="h-4 w-4" /> I'M STUCK

@@ -73,9 +73,14 @@ export default function Threshold() {
       <p className="anim-fadeUp mt-6 text-sm text-ink-mute" style={{ animationDelay: "0.5s" }}>
         There's no wrong answer. “Impossible” is where this app earns its keep.
       </p>
-      <button type="button" className="linkline anim-fadeUp mt-6 text-sm" style={{ animationDelay: "0.55s" }} onClick={() => dispatch({ type: "clearPending" })}>
-        ← change the task
-      </button>
+      <div className="anim-fadeUp mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm" style={{ animationDelay: "0.55s" }}>
+        <button type="button" className="linkline" onClick={() => dispatch({ type: "nav", screen: { id: "statecheck" } })}>
+          can't name the feeling? check your state →
+        </button>
+        <button type="button" className="linkline" onClick={() => dispatch({ type: "clearPending" })}>
+          ← change the task
+        </button>
+      </div>
     </div>
   );
 }

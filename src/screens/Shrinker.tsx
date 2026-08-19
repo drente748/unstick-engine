@@ -12,7 +12,7 @@ const TITLE_SIZES = [
 ];
 
 export default function Shrinker() {
-  const { state, dispatch, submitTask } = useApp();
+  const { state, dispatch, submitTask, profile } = useApp();
   const draft = state.draft;
   const [title, setTitle] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -78,8 +78,15 @@ export default function Shrinker() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="kicker anim-fadeUp">Task shrinker</p>
-        <span className="chip min-h-[30px] cursor-default py-1 text-xs text-butter-300">
-          size: {LEVEL_LABELS[draft.level]}
+        <span className="flex flex-wrap justify-end gap-2">
+          <span className="chip min-h-[30px] cursor-default py-1 text-xs text-butter-300">
+            size: {LEVEL_LABELS[draft.level]}
+          </span>
+          {profile.bestLevel != null && profile.confidence !== "none" && (
+            <span className="chip min-h-[30px] cursor-default border-mint-500/50 py-1 text-xs text-mint-300">
+              your sweet spot: {LEVEL_LABELS[profile.bestLevel]}
+            </span>
+          )}
         </span>
       </div>
 
@@ -168,6 +175,15 @@ export default function Shrinker() {
               onClick={() => dispatch({ type: "setLevel", level: draft.level + 1 })}
             >
               Can we make it smaller? ↓
+            </button>
+          )}
+          {draft.level > 0 && (
+            <button
+              type="button"
+              className="linkline text-sm"
+              onClick={() => dispatch({ type: "resize", delta: -1 })}
+            >
+              too small? grow it ↑
             </button>
           )}
         </div>

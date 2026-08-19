@@ -7,6 +7,9 @@ import Threshold from "./screens/Threshold";
 import Micro from "./screens/Micro";
 import Quick from "./screens/Quick";
 import Shrinker from "./screens/Shrinker";
+import OneStep from "./screens/OneStep";
+import StateCheck from "./screens/StateCheck";
+import Recover from "./screens/Recover";
 import Focus from "./screens/Focus";
 import Rescue, { Reset } from "./screens/Rescue";
 import Complete from "./screens/Complete";
@@ -124,6 +127,9 @@ function Shell() {
             {scr.id === "micro" && <Micro />}
             {scr.id === "quick" && <Quick />}
             {scr.id === "shrinker" && <Shrinker />}
+          {scr.id === "onestep" && <OneStep />}
+          {scr.id === "statecheck" && <StateCheck />}
+          {scr.id === "recover" && <Recover />}
             {scr.id === "focus" && <Focus />}
             {scr.id === "rescue" && <Rescue />}
             {scr.id === "reset" && <Reset />}

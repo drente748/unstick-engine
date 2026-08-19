@@ -37,8 +37,8 @@ export default function Rescue() {
   }
 
   function tryThis() {
-    if (!draft || !result) return;
-    dispatch({ type: "applyRescue", action: result.action, level: result.level });
+    if (!draft || !result || !picked) return;
+    dispatch({ type: "applyRescue", reason: picked, action: result.action, level: result.level });
     if (result.level !== undefined) dispatch({ type: "nav", screen: { id: "shrinker" } });
     else
       dispatch({
@@ -157,7 +157,12 @@ export function Reset() {
     if (left === 0 && screen) {
       dispatch({
         type: "nav",
-        screen: screen.returnTo === "focus" ? { id: "focus", durationSec: 60, bodyDouble: false } : { id: "shrinker" },
+        screen:
+          screen.returnTo === "focus"
+            ? { id: "focus", durationSec: 60, bodyDouble: false }
+            : screen.returnTo === "onestep"
+              ? { id: "onestep" }
+              : { id: "shrinker" },
       });
     }
   }, [left, screen, dispatch]);
@@ -187,7 +192,11 @@ export function Reset() {
           dispatch({
             type: "nav",
             screen:
-              screen.returnTo === "focus" ? { id: "focus", durationSec: 60, bodyDouble: false } : { id: "shrinker" },
+              screen.returnTo === "focus"
+                ? { id: "focus", durationSec: 60, bodyDouble: false }
+                : screen.returnTo === "onestep"
+                  ? { id: "onestep" }
+                  : { id: "shrinker" },
           })
         }
       >

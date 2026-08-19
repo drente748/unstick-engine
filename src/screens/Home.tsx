@@ -46,6 +46,17 @@ export default function Home() {
     void submitTask(t, "normal");
   }
 
+  function oneTap() {
+    const t = task.trim();
+    if (!t) {
+      setErr(true);
+      inputRef.current?.focus();
+      setTimeout(() => setErr(false), 650);
+      return;
+    }
+    void submitTask(t, "onetap");
+  }
+
   return (
     <div className="mx-auto w-full max-w-3xl px-5 pb-16 pt-10 sm:pt-16">
       {/* recovery card */}
@@ -59,7 +70,10 @@ export default function Home() {
             “{pending.title}” is still here. No pressure, no guilt — it kept your spot.
           </p>
           <div className="mt-4 flex flex-wrap gap-2.5">
-            <Btn variant="primary" onClick={() => dispatch({ type: "restartSmaller" })}>
+            <Btn variant="primary" onClick={() => dispatch({ type: "recover" })}>
+              <Icon n="loop" className="h-4 w-4" /> Next tiny step
+            </Btn>
+            <Btn variant="mint" onClick={() => dispatch({ type: "restartSmaller" })}>
               <Icon n="chevronsDown" className="h-4 w-4" /> Start smaller
             </Btn>
             <Btn
@@ -147,6 +161,14 @@ export default function Home() {
               Give it a name — anything, even “the thing”.
             </p>
           )}
+          <button
+            type="button"
+            onClick={oneTap}
+            className="mt-3.5 inline-flex items-center gap-2 text-sm font-bold text-butter-300 transition-colors duration-200 hover:text-butter-400"
+          >
+            <Icon n="zap" className="h-4 w-4" />
+            One-tap start — skip the questions, get the smallest step
+          </button>
         </form>
         <div className="mt-3.5 flex flex-wrap items-center gap-2">
           <span className="text-xs font-bold uppercase tracking-widest text-ink-mute">Try:</span>
@@ -168,7 +190,7 @@ export default function Home() {
 
       {/* secondary doors */}
       <section
-        className="anim-fadeUp mt-10 grid gap-3 sm:grid-cols-3"
+        className="anim-fadeUp mt-10 grid grid-cols-2 gap-3 lg:grid-cols-4"
         style={{ animationDelay: "0.34s" }}
         aria-label="Other ways in"
       >
@@ -184,10 +206,7 @@ export default function Home() {
         <button
           type="button"
           className="card group p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-mint-400/60"
-          onClick={() => {
-            if (state.draft) dispatch({ type: "nav", screen: { id: "shrinker" } });
-            else dispatch({ type: "nav", screen: { id: "shrinker" } });
-          }}
+          onClick={() => dispatch({ type: "nav", screen: { id: "shrinker" } })}
         >
           <Icon n="chevronsDown" className="h-5 w-5 text-mint-400" />
           <p className="mt-2.5 font-display text-base font-bold text-ink">Task Shrinker</p>
@@ -196,12 +215,24 @@ export default function Home() {
         <button
           type="button"
           className="card group p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-clay-400/60"
+          onClick={() => dispatch({ type: "nav", screen: { id: "statecheck" } })}
+        >
+          <Icon n="heart" className="h-5 w-5 text-clay-400" />
+          <p className="mt-2.5 font-display text-base font-bold text-ink">Why can't I start?</p>
+          <p className="mt-0.5 text-sm text-ink-mute">Find the real blocker.</p>
+        </button>
+        <button
+          type="button"
+          className="card group p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-butter-400/60"
           onClick={() => {
-            dispatch({ type: "toast", msg: "Name it above — we'll take it from there." });
-            inputRef.current?.focus();
+            if (state.draft) dispatch({ type: "nav", screen: { id: "rescue" } });
+            else {
+              dispatch({ type: "toast", msg: "Name it above — we'll take it from there." });
+              inputRef.current?.focus();
+            }
           }}
         >
-          <Icon n="lifebuoy" className="h-5 w-5 text-clay-400" />
+          <Icon n="lifebuoy" className="h-5 w-5 text-butter-400" />
           <p className="mt-2.5 font-display text-base font-bold text-ink">I'm stuck</p>
           <p className="mt-0.5 text-sm text-ink-mute">That's useful information.</p>
         </button>

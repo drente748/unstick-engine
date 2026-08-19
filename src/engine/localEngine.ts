@@ -1,44 +1,53 @@
-import type { Domain, RescueResult, StuckReason } from "./types";
+import type {
+  Blocker,
+  Domain,
+  Intervention,
+  Profile,
+  RescueResult,
+  SessionRecord,
+  StuckReason,
+} from "./types";
 
 /**
  * The Task Initiation Engine (deterministic, local-first).
  *
- * It implements the `InitiationEngine` contract: understand the task,
- * detect likely friction, and convert abstract intentions into one
- * concrete, physically observable action. A remote AI provider can be
- * swapped in via settings — this engine is always the fallback.
+ * Responsibilities: understand the task, detect ambiguity and likely
+ * friction, choose the smallest physically observable action, adapt step
+ * size to the user's current state, their learned profile, task complexity
+ * and available time. A remote AI provider can optionally replace the
+ * ladder source — this engine is always the fallback.
  */
 
 const KEYWORDS: Array<[Domain, RegExp]> = [
   [
     "cleaning",
-    /(clean|tidy|declutter|laundry|wash|dishes|mess|room|apartment|house|kitchen|vacuum|organize my (room|space|closet|desk)|organise)/i,
+    /(clean|tidy|declutter|laundry|wash|dishes|mess|room|apartment|house|kitchen|bathroom|garage|car|fridge|vacuum|mop|organize (my )?(room|space|closet|desk|garage)|organise|dust|trash)/i,
   ],
   [
     "writing",
-    /(write|writing|essay|article|blog|post|draft|paper|report|thesis|dissertation|cover letter|novel|story|caption)/i,
+    /(write|writing|essay|article|blog|post|draft|paper|report|thesis|dissertation|cover letter|novel|story|caption|script|newsletter|letter to)/i,
   ],
   [
     "studying",
-    /(study|studying|exam|test|revise|revision|review|homework|course|lecture|textbook|flashcards|read(ing)? (the|my|a) (book|chapter))/i,
+    /(study|studying|exam|test|revise|revision|review for|homework|course|lecture|textbook|flashcards|anki|memorize|memorise|read(ing)? (the|my|a) (book|chapter)|assignment)/i,
   ],
-  ["email", /(email|e-mail|inbox|reply|replies|message|slack|dm)/i],
+  ["email", /(email|e-mail|inbox|reply|replies|message|slack|dm|discord)/i],
   [
     "admin",
-    /(tax|taxes|bill|finance|finances|budget|bank|invoice|form|application|paperwork|paper|renew|cancel|insurance|accountant|admin)/i,
+    /(tax|taxes|bill|finance|finances|budget|bank|invoice|form|application|paperwork|paper ?s?\b|renew|cancel|insurance|accountant|admin|visa|refund|registration|contract)/i,
   ],
   [
     "code",
-    /(code|coding|program|programming|app|website|web ?site|feature|bug|repo|project|develop|software|script|api|portfolio)/i,
+    /(code|coding|program|programming|app\b|website|web ?site|feature|bug|repo|project|develop|software|script|api|portfolio|database|deploy|css|database)/i,
   ],
   [
     "health",
-    /(workout|work out|exercise|gym|run|running|yoga|stretch|walk|shower|meditate|meditation|meal prep|cook)/i,
+    /(workout|work out|exercise|gym|run\b|running|yoga|stretch|walk\b|shower|meditate|meditation|meal prep|cook|dentist|doctor)/i,
   ],
   ["calls", /(call|phone|ring|schedule|book|appointment|reserve|cancel my)/i],
   [
     "creative",
-    /(draw|drawing|paint|painting|design|sketch|music|song|guitar|piano|practice|video|edit|photo|film|create)/i,
+    /(draw|drawing|paint|painting|design|sketch|music|song|guitar|piano|practice|video|edit|photo|film|create|compose)/i,
   ],
 ];
 
@@ -48,6 +57,17 @@ export function detectDomain(task: string): Domain {
     if (re.test(t)) return domain;
   }
   return "generic";
+}
+
+/** 0..3 — how sprawling the ask is. Drives context-aware step sizing. */
+export function complexityOf(title: string): 0 | 1 | 2 | 3 {
+  const t = title.toLowerCase();
+  let score = 0;
+  if (/(entire|whole|all (my|the)|everything|complete|completely|every single|finally)/.test(t)) score++;
+  if ((t.match(/\band\b|\bthen\b/g) ?? []).length >= 1) score++;
+  if (t.length > 42) score++;
+  if (/(stuff|things|my life|everything|project)/.test(t)) score++;
+  return Math.min(score, 3) as 0 | 1 | 2 | 3;
 }
 
 export const LEVEL_LABELS = ["the normal start", "smaller", "tiny", "micro", "the floor"] as const;
@@ -224,6 +244,20 @@ const IMPERFECT: Record<Domain, string> = {
   generic: "Make a version you'd never show anyone. It still counts.",
 };
 
+/** “Just open it” flavor per domain — for avoidance and unknowns. */
+const OPEN_IT: Record<Domain, string> = {
+  cleaning: "Don't clean. Just walk to the messiest spot and touch one thing.",
+  writing: "Don't write. Just open the document and watch the cursor blink.",
+  studying: "Don't study. Just open the book to any page.",
+  email: "Don't reply. Just open the inbox and read one subject line.",
+  admin: "Don't do paperwork. Just open the folder or the app.",
+  code: "Don't code. Just open the project and look at one file name.",
+  health: "Don't work out. Just put one shoe on.",
+  calls: "Don't call. Just find the number and look at it.",
+  creative: "Don't create. Just hold the tool in your hand.",
+  generic: "Don't do it. Just open it. Opening isn't doing.",
+};
+
 export function buildLadder(domain: Domain, level: number, ladderOverride?: string[] | null): string[] {
   if (level === 0 && ladderOverride && ladderOverride.length) return ladderOverride;
   const clamped = Math.min(Math.max(level, 0), 4);
@@ -256,15 +290,27 @@ export function imperfectFirst(domain: Domain): string {
   return IMPERFECT[domain];
 }
 
-/** Maps a stuck reason to a concrete rescue strategy. */
+export function openItAction(domain: Domain): string {
+  return OPEN_IT[domain];
+}
+
+function shortTitle(title: string): string {
+  const t = title.trim();
+  return t.length > 34 ? `${t.slice(0, 32).trimEnd()}…` : t;
+}
+
+/** Scope step for sprawling tasks — pick ONE piece before touching anything. */
+export function scopeStep(title: string): string {
+  return `Choose ONE piece of “${shortTitle(title)}”. The rest can wait.`;
+}
+
+/* ---------------- rescue strategies (mid-task) ---------------- */
+
 export function rescueStrategy(domain: Domain, reason: StuckReason, level: number): RescueResult {
   const next = Math.min(level + 1, 4);
   switch (reason) {
     case "unknown-next":
-      return {
-        message: "No panic. Here's the next physical move:",
-        action: currentAction(domain, level, 1),
-      };
+      return { message: "No panic. Here's the next physical move:", action: currentAction(domain, level, 1) };
     case "too-big":
       return { message: "Okay. Let's lower the bar.", level: next };
     case "distracted":
@@ -300,10 +346,236 @@ export function rescueStrategy(domain: Domain, reason: StuckReason, level: numbe
   }
 }
 
+export const STRATEGY_LABEL: Record<StuckReason, string> = {
+  "unknown-next": "one concrete next move",
+  "too-big": "shrinking the bar",
+  distracted: "a 60-second reset",
+  tired: "the minimum viable version",
+  afraid: "the “bad on purpose” version",
+  "lost-interest": "10-second bursts",
+  "dont-want": "the minimum viable deal",
+  "dont-know": "a tiny open-it step",
+};
+
+/* ---------------- pre-start state check ---------------- */
+
+export const BLOCKERS: Array<{ v: Blocker; label: string; icon: string }> = [
+  { v: "too-big", label: "It feels too big", icon: "mountain" },
+  { v: "unclear", label: "It's unclear — I don't see the first move", icon: "fog" },
+  { v: "boring", label: "It's boring", icon: "zzz" },
+  { v: "perfectionism", label: "I want to do it perfectly", icon: "eye" },
+  { v: "anxiety", label: "I'm anxious I'll do it wrong", icon: "heart" },
+  { v: "distracted", label: "My attention keeps wandering", icon: "loop" },
+  { v: "tired", label: "I'm tired", icon: "battery" },
+  { v: "avoiding", label: "I keep avoiding it", icon: "door" },
+  { v: "dont-know", label: "I honestly don't know", icon: "question" },
+];
+
+export const BLOCKER_LABEL: Record<Blocker, string> = {
+  "too-big": "the size of it",
+  unclear: "not seeing the first move",
+  boring: "boredom",
+  perfectionism: "perfectionism",
+  anxiety: "fear of doing it wrong",
+  distracted: "a wandering attention",
+  tired: "low energy",
+  avoiding: "avoidance",
+  "dont-know": "an unnamed blocker",
+};
+
+/** Maps a named blocker to the right pre-start intervention. */
+export function blockerIntervention(domain: Domain, blocker: Blocker, level: number): Intervention {
+  switch (blocker) {
+    case "too-big":
+      return {
+        headline: "Too big → one piece only.",
+        action: "Pick ONE piece of it. Ignore the rest today.",
+        levelShift: 1,
+      };
+    case "unclear":
+      return {
+        headline: "Unclear → here's the exact physical move.",
+        action: currentAction(domain, Math.min(level, 1), 0),
+        levelShift: 0,
+      };
+    case "boring":
+      return {
+        headline: "Boring → beat it with ten seconds.",
+        action: "Give it 10 seconds. Boredom can't win a sprint.",
+        levelShift: 0,
+      };
+    case "perfectionism":
+      return {
+        headline: "Perfectionism → make it bad on purpose.",
+        action: IMPERFECT[domain],
+        levelShift: 0,
+      };
+    case "anxiety":
+      return {
+        headline: "Anxiety → the bar drops to the floor.",
+        action: IMPERFECT[domain],
+        levelShift: 1,
+      };
+    case "distracted":
+      return { headline: "Distraction → a 60-second reset first.", action: "", reset: true, levelShift: 0 };
+    case "tired":
+      return {
+        headline: "Tired → minimum viable only.",
+        action: MVT[domain] + " Stop after. Permission granted.",
+        levelShift: 1,
+      };
+    case "avoiding":
+      return { headline: "Avoiding → don't do it. Just open it.", action: OPEN_IT[domain], levelShift: 1 };
+    case "dont-know":
+      return {
+        headline: "Unknown → we go tiny.",
+        action: "Just open it. That's the entire step.",
+        levelShift: 2,
+      };
+  }
+}
+
+/* ---------------- context-aware planning ---------------- */
+
+export interface PlanInput {
+  title: string;
+  domain: Domain;
+  profile: Profile | null;
+  blocker?: Blocker | null;
+  durationSec?: number;
+}
+
+export interface Plan {
+  action: string;
+  level: number;
+  note: string | null;
+}
+
 /**
- * Optional remote provider. The app never depends on it: any failure
- * returns null and the local engine takes over with a gentle notice.
+ * Chooses the first step using task complexity, the user's current state,
+ * their learned profile and the available time. Always returns ONE action.
  */
+export function planFirstStep(inp: PlanInput): Plan {
+  const cx = complexityOf(inp.title);
+  let level: number = cx >= 2 ? 2 : cx === 1 ? 1 : 0;
+  const notes: string[] = [];
+
+  if (cx >= 2) notes.push("small start — it's a big ask");
+
+  const p = inp.profile;
+  if (p && p.bestLevel != null && p.confidence !== "none" && p.bestLevel > level) {
+    level = p.bestLevel;
+    notes.unshift(`sized for you — ${LEVEL_LABELS[p.bestLevel]} steps have given you momentum before`);
+  }
+
+  if (inp.durationSec && inp.durationSec <= 60) {
+    level = Math.min(4, level + 1);
+    notes.push("10-second-sized");
+  } else if (inp.durationSec && inp.durationSec >= 600) {
+    level = Math.max(0, level - 1);
+  }
+
+  let action: string;
+  if (inp.blocker === "perfectionism" || inp.blocker === "anxiety") {
+    action = IMPERFECT[inp.domain];
+  } else if (inp.blocker === "tired" || inp.blocker === "avoiding") {
+    action = OPEN_IT[inp.domain];
+  } else if (cx >= 2 && level <= 1) {
+    action = scopeStep(inp.title);
+  } else {
+    action = currentAction(inp.domain, level, 0);
+  }
+
+  return { action, level, note: notes[0] ?? null };
+}
+
+/* ---------------- personal start profile (local learning) ---------------- */
+
+export function durationLabel(sec: number): string {
+  if (sec <= 10) return "10 seconds";
+  if (sec <= 60) return "1 minute";
+  const m = Math.round(sec / 60);
+  return `${m} minutes`;
+}
+
+/**
+ * Studies nothing but the user's own starts: which step sizes, session
+ * lengths and rescue strategies most often lead to momentum (“I kept
+ * going”). Computed on-device; nothing is stored or sent anywhere.
+ */
+export function computeProfile(sessions: SessionRecord[]): Profile {
+  const starts = sessions.length;
+  const done = sessions.filter((s) => s.outcome !== null && s.outcome !== undefined);
+  const empty: Profile = {
+    starts,
+    bestLevel: null,
+    bestDuration: null,
+    bestStrategy: null,
+    commonBlocker: null,
+    confidence: starts >= 3 ? "low" : "none",
+  };
+  if (done.length < 2) return empty;
+
+  const rate = (map: Map<string, { kept: number; total: number }>, key: string | null | undefined, kept: boolean) => {
+    if (key == null) return;
+    const e = map.get(key) ?? { kept: 0, total: 0 };
+    e.total++;
+    if (kept) e.kept++;
+    map.set(key, e);
+  };
+
+  const levels = new Map<string, { kept: number; total: number }>();
+  const durations = new Map<string, { kept: number; total: number }>();
+  const strategies = new Map<string, { kept: number; total: number }>();
+  const blockers = new Map<string, number>();
+
+  for (const s of done) {
+    const kept = s.outcome === "kept";
+    rate(levels, s.level != null ? String(s.level) : null, kept);
+    rate(durations, s.duration != null ? String(s.duration) : null, kept);
+    rate(strategies, s.strategy ?? null, kept);
+    if (s.blocker) blockers.set(s.blocker, (blockers.get(s.blocker) ?? 0) + 1);
+  }
+
+  const best = (map: Map<string, { kept: number; total: number }>): string | null => {
+    let winner: string | null = null;
+    let bestRate = -1;
+    for (const [k, v] of map) {
+      if (v.total < 2) continue;
+      const r = v.kept / v.total;
+      if (r > bestRate || (r === bestRate && winner === null)) {
+        bestRate = r;
+        winner = k;
+      }
+    }
+    return bestRate > 0 ? winner : null;
+  };
+
+  const bl = best(levels);
+  const bd = best(durations);
+  const bs = best(strategies);
+
+  let commonBlocker: Blocker | null = null;
+  let top = 1;
+  for (const [k, v] of blockers) {
+    if (v >= 2 && v > top) {
+      top = v;
+      commonBlocker = k as Blocker;
+    }
+  }
+
+  return {
+    starts,
+    bestLevel: bl != null ? Number(bl) : null,
+    bestDuration: bd != null ? Number(bd) : null,
+    bestStrategy: bs as StuckReason | null,
+    commonBlocker,
+    confidence: done.length >= 5 ? "enough" : "low",
+  };
+}
+
+/* ---------------- optional remote AI provider ---------------- */
+
 export async function tryRemoteEngine(endpoint: string, task: string): Promise<string[] | null> {
   try {
     const ctrl = new AbortController();

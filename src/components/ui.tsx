@@ -108,6 +108,57 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M5 20c1.2-3.4 3.6-5 7-5s5.8 1.6 7 5" />
     </>
   ),
+  mountain: <path d="M3.5 19L10 7.5l3.6 5.8L16 10l4.5 9z" />,
+  fog: (
+    <>
+      <path d="M4 9h13" />
+      <path d="M7 12.8h13" />
+      <path d="M4 16.6h10" />
+    </>
+  ),
+  zzz: (
+    <>
+      <path d="M5 8.5h5l-5 5.5h5" />
+      <path d="M13.5 5h4.5l-4.5 5h4.5" />
+      <path d="M13 15.5h4l-4 4.5h4" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M3.5 12S6.5 6.5 12 6.5 20.5 12 20.5 12 17.5 17.5 12 17.5 3.5 12 3.5 12z" />
+      <circle cx="12" cy="12" r="2.6" />
+    </>
+  ),
+  heart: <path d="M12 19.5S5 15 5 9.9A3.6 3.6 0 0 1 12 8.2a3.6 3.6 0 0 1 7 1.7c0 5.1-7 9.6-7 9.6z" />,
+  loop: (
+    <>
+      <path d="M4.5 12a7.5 7.5 0 0 1 13-5.2" />
+      <path d="M19.5 12a7.5 7.5 0 0 1-13 5.2" />
+      <path d="M17.5 3v4h-4" />
+      <path d="M6.5 21v-4h4" />
+    </>
+  ),
+  battery: (
+    <>
+      <rect x="3.5" y="8" width="15" height="8.5" rx="2" />
+      <path d="M21 11v2.5" />
+      <path d="M6.8 11v2.5" />
+    </>
+  ),
+  door: (
+    <>
+      <path d="M6.5 20V5.5A1.5 1.5 0 0 1 8 4h8a1.5 1.5 0 0 1 1.5 1.5V20" />
+      <path d="M4.5 20h15" />
+      <path d="M14.3 12.4h.01" strokeWidth="2.6" />
+    </>
+  ),
+  question: (
+    <>
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M9.8 9.4a2.3 2.3 0 1 1 3.4 2c-.8.5-1.2 1-1.2 1.9" />
+      <path d="M12 16.5h.01" strokeWidth="2.6" />
+    </>
+  ),
 };
 
 export function Icon({
@@ -195,9 +246,14 @@ export function DurationPicker({
   onGo: (sec: number, bodyDouble: boolean) => void;
   goLabel?: string;
 }) {
-  const [sel, setSel] = useState(10);
-  const [custom, setCustom] = useState(false);
-  const [mins, setMins] = useState("");
+  const { profile } = useApp();
+  const learned = profile.bestDuration;
+  const isPreset = learned != null && DURATIONS.some((d) => d.s === learned);
+  const [sel, setSel] = useState<number>(isPreset && learned != null ? learned : 10);
+  const [custom, setCustom] = useState<boolean>(learned != null && !isPreset);
+  const [mins, setMins] = useState(
+    learned != null && !isPreset ? String(Math.max(1, Math.round(learned / 60))) : "",
+  );
   const [bd, setBd] = useState(false);
 
   const parsed = Math.min(Math.max(parseInt(mins, 10) || 1, 1), 180);

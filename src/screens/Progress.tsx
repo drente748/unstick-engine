@@ -1,5 +1,6 @@
 import { useApp } from "../state/store";
 import { Btn, Icon } from "../components/ui";
+import { BLOCKER_LABEL, LEVEL_LABELS, STRATEGY_LABEL, durationLabel } from "../engine/localEngine";
 
 function lastNDays(n: number): Date[] {
   const out: Date[] = [];
@@ -12,7 +13,7 @@ function lastNDays(n: number): Date[] {
 }
 
 export default function Progress() {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, profile } = useApp();
   const s = state.sessions;
 
   const todayStr = new Date().toDateString();
@@ -103,6 +104,60 @@ export default function Progress() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* start profile */}
+      <section
+        className="card anim-fadeUp mt-5 p-5 sm:p-6"
+        style={{ animationDelay: "0.22s" }}
+        aria-label="Your start profile"
+      >
+        <div className="flex items-center gap-2.5">
+          <Icon n="spark" className="h-5 w-5 text-ember-400" />
+          <p className="font-display text-lg font-bold text-ink">Your start profile</p>
+        </div>
+        {profile.confidence === "none" ? (
+          <p className="mt-3 text-sm leading-relaxed text-ink-dim">
+            Still learning. After a few sessions, Unstick notices which step sizes, lengths and rescue moves actually
+            get <em>you</em> moving — then it pre-sizes everything to fit.
+          </p>
+        ) : (
+          <div className="mt-4 space-y-2.5">
+            {profile.bestLevel != null && (
+              <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="font-bold text-ink-mute">You start best from</span>
+                <span className="font-display text-base font-bold text-mint-300">
+                  {LEVEL_LABELS[profile.bestLevel]} steps
+                </span>
+              </p>
+            )}
+            {profile.bestDuration != null && (
+              <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="font-bold text-ink-mute">Your momentum length</span>
+                <span className="font-display text-base font-bold text-butter-300">
+                  {durationLabel(profile.bestDuration)}
+                </span>
+              </p>
+            )}
+            {profile.bestStrategy && (
+              <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="font-bold text-ink-mute">When stuck, this works for you</span>
+                <span className="font-display text-base font-bold text-clay-300">
+                  {STRATEGY_LABEL[profile.bestStrategy]}
+                </span>
+              </p>
+            )}
+            {profile.commonBlocker && (
+              <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="font-bold text-ink-mute">Your usual blocker</span>
+                <span className="font-display text-base font-bold text-ink">{BLOCKER_LABEL[profile.commonBlocker]}</span>
+              </p>
+            )}
+            <p className="pt-2 text-xs text-ink-mute">
+              Learned locally from {profile.starts} start{profile.starts === 1 ? "" : "s"}. Nothing leaves this device.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* ledger */}

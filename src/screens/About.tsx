@@ -4,10 +4,12 @@ import { Icon } from "../components/ui";
 const LOOP = [
   { icon: "wave", text: "You're stuck. That's the starting line, not a verdict.", tone: "text-clay-300" },
   { icon: "spark", text: "Name the thing — one line, no detail.", tone: "text-butter-300" },
+  { icon: "heart", text: "Can't name the feeling? A quick state check finds the real blocker and picks the counter-move.", tone: "text-clay-300" },
   { icon: "chevronsDown", text: "Shrink it until it's a physical move: open it, touch it, stand up.", tone: "text-mint-400" },
   { icon: "play", text: "Start for 10 seconds. Stopping after is allowed and still counts.", tone: "text-ember-400" },
   { icon: "zap", text: "Momentum shows up more often than motivation does.", tone: "text-mint-400" },
   { icon: "lifebuoy", text: "Stuck again? Rescue mode shrinks it further. Loop, don't spiral.", tone: "text-butter-300" },
+  { icon: "loop", text: "Interrupted? Recovery hands you the next tiny step — nothing restarts.", tone: "text-mint-400" },
 ];
 
 const KEYS: Array<[string, string]> = [
@@ -78,6 +80,7 @@ export default function About() {
           <li>· Everything is stored in your browser. No account, no cloud, no analytics.</li>
           <li>· Turn off “remember task names” and history stores zero task text.</li>
           <li>· Export or erase your data any time from Settings.</li>
+          <li>· Your start profile is computed on-device from your own sessions — patterns, not surveillance.</li>
           <li>· The AI engine is optional — the built-in one never phones home.</li>
         </ul>
       </section>

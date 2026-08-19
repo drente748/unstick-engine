@@ -90,6 +90,18 @@ export default function Complete() {
               WRAP UP
             </Btn>
           </div>
+          {draft.level > 0 && (
+            <button
+              type="button"
+              className="linkline mt-5 text-sm"
+              onClick={() => {
+                dispatch({ type: "resize", delta: -1 });
+                dispatch({ type: "nav", screen: { id: "shrinker" } });
+              }}
+            >
+              feeling strong? grow the next step ↑
+            </button>
+          )}
         </div>
       )}
 
@@ -100,10 +112,13 @@ export default function Complete() {
             You still started. Stopping is allowed here — we can make the next attempt even smaller.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Btn variant="primary" size="lg" onClick={() => dispatch({ type: "restartSmaller" })}>
+            <Btn variant="primary" size="lg" onClick={() => dispatch({ type: "recover" })}>
+              <Icon n="loop" className="h-4 w-4" /> NEXT TINY STEP
+            </Btn>
+            <Btn size="lg" onClick={() => dispatch({ type: "restartSmaller" })}>
               <Icon n="chevronsDown" className="h-4 w-4" /> RESTART SMALLER
             </Btn>
-            <Btn size="lg" onClick={() => dispatch({ type: "clearPending" })}>
+            <Btn variant="quiet" size="lg" onClick={() => dispatch({ type: "clearPending" })}>
               DONE FOR NOW
             </Btn>
           </div>
