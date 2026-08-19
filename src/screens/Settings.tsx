@@ -2,7 +2,45 @@ import { useState, type ReactNode } from "react";
 import { useApp } from "../state/store";
 import { Btn, Icon, Toggle } from "../components/ui";
 import { exportData } from "../lib/persist";
-import type { Persisted } from "../engine/types";
+import type { Persisted, ThemeId } from "../engine/types";
+
+const THEMES: Array<{
+  id: ThemeId;
+  name: string;
+  vibe: string;
+  bg: string;
+  card: string;
+  ink: string;
+  accents: [string, string, string];
+}> = [
+  {
+    id: "pine",
+    name: "Pine",
+    vibe: "deep, quiet night",
+    bg: "#0f1a15",
+    card: "#17271f",
+    ink: "#f4efe2",
+    accents: ["#ff8a45", "#52c08f", "#f2c160"],
+  },
+  {
+    id: "dawn",
+    name: "Dawn",
+    vibe: "soft sage daylight",
+    bg: "#eef1e8",
+    card: "#fbfcf7",
+    ink: "#20301f",
+    accents: ["#ef7c26", "#2e9d6d", "#d9a437"],
+  },
+  {
+    id: "rain",
+    name: "Rain",
+    vibe: "cool slate dusk",
+    bg: "#101720",
+    card: "#1a2532",
+    ink: "#edf1f4",
+    accents: ["#ff8a45", "#63c4b4", "#f2c160"],
+  },
+];
 
 export default function Settings() {
   const { state, dispatch } = useApp();
@@ -50,7 +88,59 @@ export default function Settings() {
         Make it yours.
       </h2>
 
-      <section className="anim-fadeUp mt-8" style={{ animationDelay: "0.1s" }} aria-label="Appearance and behavior">
+      <section className="anim-fadeUp mt-8" style={{ animationDelay: "0.1s" }} aria-label="Theme">
+        <h3 className="font-display text-lg font-bold text-ink">Theme</h3>
+        <p className="mt-1 text-sm text-ink-mute">
+          Three calm palettes, zero clutter. Pick whichever your eyes like today — it saves automatically.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3" role="group" aria-label="Choose a theme">
+          {THEMES.map((t) => {
+            const active = s.theme === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => set({ theme: t.id })}
+                className={`card group overflow-hidden text-left transition-all duration-200 hover:-translate-y-1 ${
+                  active ? "border-ember-400 shadow-lg shadow-black/20" : "hover:border-pine-600"
+                }`}
+              >
+                <span className="block p-3" style={{ backgroundColor: t.bg }}>
+                  <span
+                    className="block rounded-lg p-2.5"
+                    style={{ backgroundColor: t.card, border: `1px solid ${t.bg === "#eef1e8" ? "#d2dac6" : "#2c4234"}` }}
+                  >
+                    <span className="block h-1.5 w-3/4 rounded-full" style={{ backgroundColor: t.ink, opacity: 0.75 }} />
+                    <span
+                      className="mt-1.5 block h-1.5 w-1/2 rounded-full"
+                      style={{ backgroundColor: t.ink, opacity: 0.3 }}
+                    />
+                    <span className="mt-2.5 flex gap-1.5">
+                      {t.accents.map((a) => (
+                        <span key={a} className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: a }} />
+                      ))}
+                    </span>
+                  </span>
+                </span>
+                <span className="flex items-center justify-between gap-2 px-3.5 py-3">
+                  <span>
+                    <span className="font-display block text-base font-bold text-ink">{t.name}</span>
+                    <span className="block text-xs text-ink-mute">{t.vibe}</span>
+                  </span>
+                  {active && (
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ember-500 text-ember-950">
+                      <Icon n="check" className="h-3.5 w-3.5" sw={2.6} />
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="anim-fadeUp mt-8" style={{ animationDelay: "0.14s" }} aria-label="Appearance and behavior">
         <Row title="Text size" desc="Bigger words, less squinting.">
           <div className="flex gap-1.5" role="group" aria-label="Text size">
             {([100, 112, 125] as const).map((v, i) => (

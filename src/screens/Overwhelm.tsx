@@ -28,7 +28,12 @@ export default function Overwhelm() {
     : "";
 
   return (
-    <div className="fixed inset-0 z-[55] overflow-y-auto bg-pine-950/[0.97]" role="dialog" aria-modal="true" aria-label="Anti-overwhelm mode">
+    <div
+      className="anim-fadeIn fixed inset-0 z-[55] overflow-y-auto bg-pine-950"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Anti-overwhelm mode"
+    >
       <div className="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center px-5 py-14">
         {phase === 0 && (
           <div className="anim-pop">

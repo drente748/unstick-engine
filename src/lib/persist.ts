@@ -3,6 +3,7 @@ import type { Persisted, Settings } from "../engine/types";
 const KEY = "unstick:v1";
 
 export const DEFAULT_SETTINGS: Settings = {
+  theme: "pine",
   textScale: 100,
   reduceMotion: false,
   sound: true,

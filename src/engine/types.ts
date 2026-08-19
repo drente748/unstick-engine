@@ -70,7 +70,10 @@ export interface SessionRecord {
   outcome: Outcome | null;
 }
 
+export type ThemeId = "pine" | "dawn" | "rain";
+
 export interface Settings {
+  theme: ThemeId;
   textScale: 100 | 112 | 125;
   reduceMotion: boolean;
   sound: boolean;

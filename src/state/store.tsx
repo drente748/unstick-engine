@@ -265,6 +265,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.settings.reduceMotion]);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = state.settings.theme;
+  }, [state.settings.theme]);
+
+  useEffect(() => {
     if (!state.toast) return;
     const t = setTimeout(() => dispatch({ type: "untoast" }), 3600);
     return () => clearTimeout(t);

@@ -41,6 +41,8 @@
   --color-clay-400: #f09a85;
   --color-clay-500: #de7f6b;
   --color-clay-950: #33150e;
+
+  --color-field: #0c1613;
 }
 
 html {
@@ -96,10 +98,9 @@ body {
     border-radius: 18px;
   }
 
-  .field {
-    width: 100%;
-    background: #0c1613;
-    border: 1.5px solid var(--color-line);
+.field {
+  width: 100%;
+  background: var(--color-field);    border: 1.5px solid var(--color-line);
     border-radius: 14px;
     padding: 0.9rem 1.1rem;
     color: var(--color-ink);
@@ -409,4 +410,77 @@ html.reduce-motion *::after {
 }
 html.reduce-motion .mote {
   display: none;
+}
+
+/* ================= themes =================
+   Every color in the app reads a CSS variable, so overriding the
+   variables on <html data-theme> re-skins the whole product.
+   All three themes are deliberately calm: muted saturation, warm or
+   cool but never neon, high-contrast text. */
+
+/* Dawn — soft sage-tinted daylight, for bright rooms and bright hours */
+html[data-theme="dawn"] {
+  --color-pine-950: #eef1e8;
+  --color-pine-900: #e6eadf;
+  --color-pine-850: #fbfcf7;
+  --color-pine-800: #edf0e6;
+  --color-pine-700: #dce2d2;
+  --color-pine-600: #c2cdb6;
+  --color-pine-500: #a3b296;
+
+  --color-line: #d2dac6;
+  --color-line-soft: #e0e5d7;
+
+  --color-ink: #20301f;
+  --color-ink-dim: #43544a;
+  --color-ink-mute: #5c6e61;
+
+  --color-ember-300: #a84e0d;
+  --color-ember-400: #c55f15;
+  --color-ember-500: #ef7c26;
+  --color-ember-600: #c25a10;
+  --color-ember-700: #a04a0c;
+
+  --color-mint-300: #1c6e4c;
+  --color-mint-400: #237d56;
+  --color-mint-500: #2a9166;
+
+  --color-butter-300: #8a600d;
+  --color-butter-400: #a3750f;
+  --color-butter-500: #c69327;
+
+  --color-clay-300: #a84a35;
+  --color-clay-400: #c65f47;
+  --color-clay-500: #d9705a;
+
+  --color-field: #ffffff;
+  color-scheme: light;
+}
+
+/* Rain — cool slate dusk, low-stimulation and easy on tired eyes */
+html[data-theme="rain"] {
+  --color-pine-950: #0c1117;
+  --color-pine-900: #101720;
+  --color-pine-850: #141d28;
+  --color-pine-800: #1a2532;
+  --color-pine-700: #223141;
+  --color-pine-600: #2e4256;
+  --color-pine-500: #3c546c;
+
+  --color-line: #233240;
+  --color-line-soft: #1a2531;
+
+  --color-ink: #edf1f4;
+  --color-ink-dim: #bcc8d2;
+  --color-ink-mute: #8193a3;
+
+  --color-mint-300: #9adfd2;
+  --color-mint-400: #63c4b4;
+  --color-mint-500: #46ab9b;
+
+  --color-clay-300: #f2b3a3;
+  --color-clay-400: #e08d7a;
+  --color-clay-500: #cf7a67;
+
+  --color-field: #0e151d;
 }

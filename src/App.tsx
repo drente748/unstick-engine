@@ -117,22 +117,24 @@ function Shell() {
     <div className="relative z-10 flex min-h-screen flex-col">
       {!immersive && scr.id !== "overwhelm" && <Header />}
       <main id="main" className="flex-1">
-        <div key={key} className={immersive ? undefined : "screen-in"}>
-          {scr.id === "home" && <Home />}
-          {scr.id === "threshold" && <Threshold />}
-          {scr.id === "micro" && <Micro />}
-          {scr.id === "quick" && <Quick />}
-          {scr.id === "shrinker" && <Shrinker />}
-          {scr.id === "focus" && <Focus />}
-          {scr.id === "rescue" && <Rescue />}
-          {scr.id === "reset" && <Reset />}
-          {scr.id === "complete" && <Complete />}
-          {scr.id === "overwhelm" && <Overwhelm />}
-          {scr.id === "progress" && <Progress />}
-          {scr.id === "settings" && <Settings />}
-          {scr.id === "about" && <About />}
-        </div>
+        {scr.id !== "overwhelm" && (
+          <div key={key} className={immersive ? undefined : "screen-in"}>
+            {scr.id === "home" && <Home />}
+            {scr.id === "threshold" && <Threshold />}
+            {scr.id === "micro" && <Micro />}
+            {scr.id === "quick" && <Quick />}
+            {scr.id === "shrinker" && <Shrinker />}
+            {scr.id === "focus" && <Focus />}
+            {scr.id === "rescue" && <Rescue />}
+            {scr.id === "reset" && <Reset />}
+            {scr.id === "complete" && <Complete />}
+            {scr.id === "progress" && <Progress />}
+            {scr.id === "settings" && <Settings />}
+            {scr.id === "about" && <About />}
+          </div>
+        )}
       </main>
+      {scr.id === "overwhelm" && <Overwhelm />}
       {FOOTER_SCREENS.has(scr.id) && <Footer />}
       <Toast />
     </div>
