@@ -6,11 +6,19 @@
    hypothesis → capacity → size → candidates → score →
    guardrails → dedupe → select → explain → learn → profile.
 
-   Every stage is a small pure function. The only source of
-   truth for learning is the persisted SessionRecord list; the
-   Profile is always re-derived, never stored, so it can never
-   drift or explode after one event.
+   CONTRACT RULES (enforced by these types, not by hope):
+   · Level is a branded 0..4 union — invalid sizes are
+     unrepresentable in Draft / Decision / PreviewStep / sessions.
+   · Medium is a hard compatibility dimension — every template
+     declares the media it is valid for, and every generator
+     filters through that declaration.
+   · EngineMemory carries the ONE canonical anti-repetition state
+     (exact + intent fingerprints) used by every code path that
+     can emit an action.
    ============================================================ */
+
+/** Validated adaptive step size: 0 full … 4 the floor. */
+export type Level = 0 | 1 | 2 | 3 | 4;
 
 /** Coarse task structure — what KIND of thing this is. */
 export type Structure =
@@ -27,6 +35,14 @@ export type Structure =
   | "organizing"
   | "project"
   | "generic";
+
+/**
+ * Where the task happens. A HARD compatibility dimension:
+ * templates and rungs declare which media they are valid for,
+ * and generators must filter on it. "unknown" allows either, but
+ * never licenses fabricating a location or an app.
+ */
+export type Medium = "digital" | "physical" | "mixed" | "unknown";
 
 /** The ten initiation strategy categories. */
 export type StrategyId =
@@ -112,6 +128,8 @@ export interface TaskAnalysis {
   physical: boolean;
   /** Happens on a screen. */
   digital: boolean;
+  /** Derived hard compatibility class (see Medium). */
+  medium: Medium;
   /** Requires opening another application to even begin. */
   needsApp: boolean;
   /** The wording already contains an obvious first step. */
@@ -164,7 +182,7 @@ export interface CostVector {
 export interface CandidateAction {
   action: string;
   strategy: StrategyId;
-  size: number;
+  size: Level;
   costs: CostVector;
   source: "template" | "decompose" | "fallback";
 }
@@ -182,7 +200,7 @@ export interface DecisionMeta {
 export interface EngineResult {
   action: string;
   strategy: StrategyId;
-  size: number;
+  size: Level;
   note: string | null;
 }
 
@@ -191,28 +209,36 @@ export type Decision = EngineResult & DecisionMeta;
 export interface PreviewStep {
   action: string;
   strategy: StrategyId;
-  size: number;
+  size: Level;
 }
 
 /* ---------------- engine runtime ---------------- */
 
-interface SizeTrack {
-  size: number;
+export interface SizeTrack {
+  /** The size being tracked (null = no streak yet). */
+  size: Level | null;
   /** Consecutive positive outcomes at that size. */
   worked: number;
   /** Consecutive negative outcomes at that size. */
   failed: number;
 }
 
-/** Anti-repetition + adaptation memory for the current attempt chain. */
+/**
+ * Anti-repetition + adaptation memory for the current attempt chain.
+ * This is the ONE canonical dedupe state: every code path that can
+ * emit an action records it here under both its exact fingerprint
+ * (shown) and its intent fingerprint (shownIntents).
+ */
 export interface EngineMemory {
-  /** Normalized action texts already shown (capped). */
+  /** Exact-normalized action texts already shown (capped). */
   shown: string[];
+  /** Intent fingerprints already shown — catches wording variants. */
+  shownIntents: string[];
   /** Strategy ids already used (capped). */
   strategies: StrategyId[];
   /** Strategies that were followed by negative feedback. */
   failed: StrategyId[];
-  /** Normalized actions followed by negative feedback, with counts. */
+  /** Exact-normalized actions followed by negative feedback, with counts. */
   failedActions: Array<{ k: string; n: number }>;
   /** Hysteresis for size adaptation (prevents oscillation). */
   sizeTrack: SizeTrack;
@@ -229,7 +255,7 @@ export interface Profile {
   starts: number;
   kept: number;
   /** Step size that most often led to momentum. */
-  bestSize: number | null;
+  bestSize: Level | null;
   /** Session length that most often led to momentum. */
   bestDuration: number | null;
   bestStrategy: StrategyId | null;
@@ -262,8 +288,8 @@ export interface SessionRecord {
   steps: number;
   rescues: number;
   outcome: Outcome | null;
-  /** Adaptive step size used (0..4). */
-  size: number;
+  /** Adaptive step size used. */
+  size: Level;
   /** Planned session length in seconds. */
   duration: number;
   entry: EntryKind;
@@ -276,8 +302,8 @@ export interface SessionRecord {
 export interface Draft {
   title: string;
   analysis: TaskAnalysis;
-  /** Adaptive step size: 0 full … 4 the floor. */
-  level: number;
+  /** Adaptive step size — always a valid Level. */
+  level: Level;
   stepIndex: number;
   stepsDone: number;
   rescues: number;

@@ -22,6 +22,7 @@ import type {
   Settings,
   StuckReason,
 } from "../engine/types";
+import { clampLevel } from "../engine/analysis";
 import {
   adaptFromFeedback,
   advanceStep,
@@ -103,15 +104,52 @@ function patchSession(sessions: SessionRecord[], id: string | null, patch: Parti
   return sessions.map((s) => (s.id === id ? { ...s, ...patch } : s));
 }
 
-/** Migrate drafts persisted by older engine versions. */
+/** Non-negative integer from untyped persisted JSON — never NaN, never undefined. */
+function safeInt(v: unknown, fallback = 0): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
+
+/**
+ * Rebuild a Draft from untyped persisted JSON.
+ * Persistence is a trust boundary: whatever shape an older engine
+ * version (or corrupted storage) left behind, the rebuilt Draft is
+ * guaranteed valid — analysis and memory are always regenerated,
+ * every numeric field is sanitized, and level is clamped to a real
+ * Level. Invalid state can never cross into the reducer.
+ */
 function migrateDraft(d: unknown): Draft | null {
-  const draft = d as Draft | null;
-  if (!draft) return null;
-  if (!draft.analysis || !draft.memory) {
-    const fresh = makeDraft(draft.title ?? "", draft.entry ?? "normal", null);
-    return { ...fresh, ...draft, analysis: fresh.analysis, memory: fresh.memory };
-  }
-  return draft;
+  if (!d || typeof d !== "object") return null;
+  const raw = d as Partial<Draft> & Record<string, unknown>;
+  if (typeof raw.title !== "string" || !raw.title.trim()) return null;
+
+  const fresh = makeDraft(raw.title, (raw.entry as Draft["entry"]) ?? "normal", (raw.ladderOverride as string[] | null) ?? null);
+  const validEntries: Draft["entry"][] = ["normal", "ten", "shrinker", "overwhelm", "onetap", "statecheck", "recover"];
+  const validKinds: Draft["kind"][] = ["focus", "ten", "micro"];
+
+  return {
+    title: fresh.title,
+    analysis: fresh.analysis,
+    level: clampLevel(Number(raw.level)),
+    stepIndex: safeInt(raw.stepIndex),
+    stepsDone: safeInt(raw.stepsDone),
+    rescues: safeInt(raw.rescues),
+    feedbacks: safeInt(raw.feedbacks),
+    startedAt: safeInt(raw.startedAt),
+    enteredAt: safeInt(raw.enteredAt) || Date.now(),
+    sessionId: typeof raw.sessionId === "string" ? raw.sessionId : null,
+    kind: validKinds.includes(raw.kind as Draft["kind"]) ? (raw.kind as Draft["kind"]) : "focus",
+    override: typeof raw.override === "string" ? raw.override : null,
+    strategy: (raw.strategy as Draft["strategy"]) ?? null,
+    note: typeof raw.note === "string" ? raw.note : null,
+    ladderOverride: Array.isArray(raw.ladderOverride)
+      ? (raw.ladderOverride as unknown[]).filter((x): x is string => typeof x === "string")
+      : null,
+    entry: validEntries.includes(raw.entry as Draft["entry"]) ? (raw.entry as Draft["entry"]) : "normal",
+    blocker: (raw.blocker as Draft["blocker"]) ?? null,
+    lastFeedback: (raw.lastFeedback as Draft["lastFeedback"]) ?? null,
+    memory: fresh.memory,
+  };
 }
 
 function reducer(state: State, a: Action): State {
@@ -216,8 +254,7 @@ function reducer(state: State, a: Action): State {
 
     case "setLevel": {
       if (!state.draft) return state;
-      const level = Math.max(0, Math.min(4, a.level));
-      const plan = planFirstStep(state.draft.analysis, { profile });
+      const level = clampLevel(a.level);
       const res = advanceStep({ ...state.draft, level }, profile);
       return {
         ...state,
@@ -228,14 +265,14 @@ function reducer(state: State, a: Action): State {
           strategy: res.strategy,
           memory: res.memory,
           stepsDone: state.draft.stepsDone,
-          note: plan.note ?? state.draft.note,
+          note: res.decision.reason ?? state.draft.note,
         },
       };
     }
 
     case "resize": {
       if (!state.draft) return state;
-      const level = Math.max(0, Math.min(4, state.draft.level + a.delta));
+      const level = clampLevel(state.draft.level + a.delta);
       const base: Draft = { ...state.draft, level, lastFeedback: a.delta > 0 ? "tooBig" : "worked" };
       const res = adaptFromFeedback(base, profile, a.delta > 0 ? "tooBig" : "worked");
       return {
@@ -344,9 +381,7 @@ function reducer(state: State, a: Action): State {
       const res = adaptFromFeedback(state.draft, profile, a.kind);
       const sessions =
         a.kind === "worked"
-          ? patchSession(state.sessions, state.draft.sessionId, { steps: undefined }).map((s) =>
-              s.id === state.draft?.sessionId ? { ...s, steps: s.steps + 1 } : s,
-            )
+          ? state.sessions.map((s) => (s.id === state.draft?.sessionId ? { ...s, steps: s.steps + 1 } : s))
           : state.sessions;
       return {
         ...state,

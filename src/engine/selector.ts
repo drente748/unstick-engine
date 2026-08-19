@@ -1,5 +1,13 @@
-import { hashStr, normalizeAction } from "./analysis";
-import { BARRIER_STRATEGIES, STRATEGIES, STRATEGY_MAP, STRUCTURE_FIT, decompose, renderStrategy } from "./strategies";
+import { clampLevel, hashStr, intentKey, normalizeAction } from "./analysis";
+import {
+  BARRIER_STRATEGIES,
+  STRATEGIES,
+  STRATEGY_MAP,
+  STRUCTURE_FIT,
+  decompose,
+  renderStrategy,
+  strategyFitsTask,
+} from "./strategies";
 import type {
   Barrier,
   CandidateAction,
@@ -8,6 +16,7 @@ import type {
   Draft,
   EngineMemory,
   FeedbackKind,
+  Level,
   PreviewStep,
   Profile,
   Rate,
@@ -17,15 +26,24 @@ import type {
 
 /* ============================================================
    Stages 8–12 — size adaptation, candidate generation, scoring,
-   guardrails, duplicate checks and final selection.
+   guardrails, dedupe and final selection.
 
-   Every dimension is normalized to [0, 1] and the weights below
-   are the whole policy — readable, tunable, documented:
+   INVARIANTS ENFORCED HERE (and reused by every other emitter):
+   · Sizes are Levels — clampLevel at every boundary, NaN cannot
+     survive (see analysis.clampLevel).
+   · Medium compatibility — candidates only come from templates
+     whose `fits` prerequisites hold (renderStrategy null-gate).
+   · ONE dedupe mechanism — intentKey fingerprints recorded in
+     EngineMemory.shownIntents; a shown intent is never re-served
+     while a distinct valid action exists, in selection, ladders,
+     recovery and fallbacks alike.
+   · Guardrails — every emitted string passes passesGuardrails.
 
+   Scoring policy (all dimensions normalized to [0, 1]):
      + progressValue   .30  real task-state change
      + barrierFit      .20  counters the named/likely barrier
      + preferenceFit   .12  this user's historically-working kind
-     + historyFit      .10  completion rate for this structure/size
+     + historyFit      .10  completion rate for this structure
      + confidence      .10  engine belief it's executable as written
      + novelty         .08  distance from what was already shown
      − effortCost      .18  physical/time work
@@ -33,9 +51,8 @@ import type {
      − ambiguity       .10  unclear how-to
      − cognitiveLoad   .08  decisions demanded
      − emotional       .14  dread the action gets close to
-
-   The selection target is NOT "smallest possible" — it is the
-   minimum-friction action that still buys MEANINGFUL progress.
+   Target: minimum friction WITH meaningful progress — never the
+   blindly smallest, never the most impressive.
    ============================================================ */
 
 const W = {
@@ -58,17 +75,20 @@ const FAILED_ACTION_CAP = 10;
 export function emptyMemory(): EngineMemory {
   return {
     shown: [],
+    shownIntents: [],
     strategies: [],
     failed: [],
     failedActions: [],
-    sizeTrack: { size: -1, worked: 0, failed: 0 },
+    sizeTrack: { size: null, worked: 0, failed: 0 },
   };
 }
 
 export function remember(mem: EngineMemory, action: string, strategy: StrategyId): EngineMemory {
   const norm = normalizeAction(action);
+  const intent = intentKey(action);
   return {
     shown: [...mem.shown.filter((s) => s !== norm).slice(-(MEM_CAP - 1)), norm],
+    shownIntents: [...mem.shownIntents.filter((s) => s !== intent).slice(-(MEM_CAP - 1)), intent],
     strategies: [...mem.strategies.filter((s) => s !== strategy).slice(-9), strategy],
     failed: mem.failed,
     failedActions: mem.failedActions,
@@ -92,29 +112,32 @@ export function markFailed(mem: EngineMemory, strategy: StrategyId | null, actio
   };
 }
 
+/** Was this exact action already shown? (canonical check) */
+export function wasShown(mem: EngineMemory, action: string): boolean {
+  return mem.shown.includes(normalizeAction(action)) || mem.shownIntents.includes(intentKey(action));
+}
+
 /* ---------------- stage 8: adaptive task size ---------------- */
 
-interface SizeCtx {
+export interface SizeCtx {
   analysis: TaskAnalysis;
   barrier: Barrier | null;
   durationSec?: number | null;
   profile?: Profile | null;
   lastFeedback?: FeedbackKind | null;
-  currentSize?: number | null;
+  currentSize?: Level | null;
   capacityEnergy?: number | null;
   alreadyStarted?: boolean;
-  /** Streak data from memory — the hysteresis source. */
   sizeTrack?: EngineMemory["sizeTrack"];
 }
 
-const clampSize = (n: number): number => Math.max(0, Math.min(4, n));
-
 /**
- * Compute the step size the engine should aim for right now (0..4).
- * Uses hysteresis: one conservative move at a time, streaks required
- * before testing a bigger step, so the size never oscillates.
+ * Compute the step size the engine should aim for right now.
+ * Always returns a valid Level. Uses hysteresis: one conservative
+ * move at a time, streaks required before testing a bigger step,
+ * so the size never oscillates.
  */
-export function sizeFor(ctx: SizeCtx): number {
+export function sizeFor(ctx: SizeCtx): Level {
   const a = ctx.analysis;
 
   /* base: complexity of the ask */
@@ -131,38 +154,38 @@ export function sizeFor(ctx: SizeCtx): number {
 
   /* available time */
   if (ctx.durationSec != null) {
-    if (ctx.durationSec <= 60) size = clampSize(size + 1);
-    else if (ctx.durationSec >= 600) size = clampSize(size - 1);
+    if (ctx.durationSec <= 60) size = clampLevel(size + 1);
+    else if (ctx.durationSec >= 600) size = clampLevel(size - 1);
   }
 
   /* slow starters get a smaller doorway (time-to-start as evidence) */
   const p = ctx.profile ?? null;
-  if (p && p.avgTimeToStart != null && p.avgTimeToStart > 90 && !ctx.barrier) size = clampSize(size + 1);
+  if (p && p.avgTimeToStart != null && p.avgTimeToStart > 90 && !ctx.barrier) size = clampLevel(size + 1);
 
-  /* what this user historically starts best — but only ever move ONE step toward it */
+  /* what this user historically starts best — only ever move ONE step toward it */
   if (p && p.bestSize != null && (p.confidence === "emerging" || p.confidence === "stable") && !ctx.barrier) {
     size = p.bestSize > size ? Math.min(p.bestSize, size + 1) : Math.max(p.bestSize, size - 1);
   }
 
   /* momentum: hot → allow testing one size bigger (smaller number) */
-  if (p?.momentum === "hot" && !ctx.barrier && ctx.lastFeedback === "worked") size = clampSize(size - 1);
+  if (p?.momentum === "hot" && !ctx.barrier && ctx.lastFeedback === "worked") size = clampLevel(size - 1);
 
   /* explicit feedback, with streak hysteresis */
   const track = ctx.sizeTrack;
-  if (ctx.lastFeedback === "tooBig" || ctx.lastFeedback === "stuck") {
+  if (ctx.lastFeedback === "tooBig" || ctx.lastFeedback === "stuck" || ctx.lastFeedback === "irrelevant") {
     /* one failure is enough evidence to shrink */
-    size = clampSize((ctx.currentSize ?? size) + 1);
+    size = clampLevel((ctx.currentSize ?? size) + 1);
   } else if (ctx.lastFeedback === "worked") {
     /* two consecutive wins at a size before we test a bigger step (counting this win) */
-    const workedStreak = track && track.size === (ctx.currentSize ?? size) ? track.worked + 1 : 1;
-    if (workedStreak >= 2) size = clampSize((ctx.currentSize ?? size) - 1);
+    const workedStreak = track && track.size != null && track.size === (ctx.currentSize ?? size) ? track.worked + 1 : 1;
+    if (workedStreak >= 2) size = clampLevel((ctx.currentSize ?? size) - 1);
     else size = ctx.currentSize ?? size;
   }
 
   /* momentum in flight: already moving → don't shrink under them */
   if (ctx.alreadyStarted && ctx.lastFeedback === "worked") size = Math.min(size, ctx.currentSize ?? size);
 
-  return clampSize(size);
+  return clampLevel(size);
 }
 
 /* ---------------- stage 9: candidate generation ---------------- */
@@ -170,7 +193,7 @@ export function sizeFor(ctx: SizeCtx): number {
 export interface GenCtx {
   analysis: TaskAnalysis;
   barrier: Barrier | null;
-  size: number;
+  size: Level;
   memory: EngineMemory;
   profile: Profile | null;
   salt: number;
@@ -179,12 +202,10 @@ export interface GenCtx {
   avoidStrategy?: StrategyId | null;
 }
 
-function clamp01(x: number): number {
-  return Math.max(0, Math.min(1, x));
-}
+const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 
 /** Refine a strategy's base costs with this task's measured signals. */
-function costsFor(id: StrategyId, a: TaskAnalysis, size: number, profile: Profile | null): CostVector {
+function costsFor(id: StrategyId, a: TaskAnalysis, size: Level, profile: Profile | null): CostVector {
   const def = STRATEGY_MAP[id];
   const b = def.base;
   const structureFit = (STRUCTURE_FIT[a.structure][id] ?? 1) / 6;
@@ -195,7 +216,7 @@ function costsFor(id: StrategyId, a: TaskAnalysis, size: number, profile: Profil
   const progress = clamp01(b.progress + structureFit * 0.25 - sizeShift * 0.35);
   const effort = clamp01(b.effort + a.effort * 0.1 - sizeShift * 0.12);
   const initiation = clamp01(
-    b.initiation + (a.needsApp ? 0.12 : 0) + (a.dependencies * 0.05) - sizeShift * 0.1,
+    b.initiation + (a.needsApp ? 0.12 : 0) + a.dependencies * 0.05 - sizeShift * 0.1,
   );
   const ambiguity = clamp01(
     a.ambiguity * 0.55 + (id === "question" ? -0.15 : 0) + (id === "info" ? -0.1 : 0) + (a.clearFirstStep ? -0.1 : 0),
@@ -248,10 +269,9 @@ function scoreCandidate(c: CandidateAction, ctx: GenCtx): number {
   }
 
   /* novelty: distance from shown actions & recently used strategies */
-  const shown = ctx.memory.shown;
   const recency = ctx.memory.strategies.indexOf(c.strategy);
   const strategyFresh = recency < 0 ? 1 : Math.min(1, (ctx.memory.strategies.length - 1 - recency) / 3);
-  const textFresh = shown.includes(normalizeAction(c.action)) ? 0 : 0.75 + strategyFresh * 0.25;
+  const textFresh = wasShown(ctx.memory, c.action) ? 0 : 0.75 + strategyFresh * 0.25;
 
   /* failed-history penalties — strong but never permanent */
   const failedAction = ctx.memory.failedActions.find((f) => f.k === normalizeAction(c.action));
@@ -288,12 +308,15 @@ function scoreCandidate(c: CandidateAction, ctx: GenCtx): number {
 
 const VAGUE_OPENERS = ["just start", "break it into", "be more productive", "focus on your goals", "try harder"];
 const JUDGMENTAL = ["lazy", "procrastinat", "you should have", "stop being", "discipline"];
+/** Fabricated-context markers — templates must never produce these. */
+const FABRICATED = ["where it happens", "spot where", "where the ", "happens. nothing"];
 
 /**
  * Validity rules. Reject anything that is empty, vague filler,
- * judgmental, a disguised multi-step plan, or unrunnable as
- * written. Templates pass by construction; this gate exists for
- * synthesized and (optional) AI-provided steps.
+ * judgmental, a disguised multi-step plan, unrunnable as written,
+ * or built on a fabricated location/context. Templates pass by
+ * construction; this gate also covers synthesized and AI-provided
+ * steps, so every emission path shares one definition of "valid".
  */
 export function passesGuardrails(action: string): boolean {
   const s = action.trim();
@@ -301,6 +324,7 @@ export function passesGuardrails(action: string): boolean {
   const lower = s.toLowerCase();
   if (VAGUE_OPENERS.some((v) => lower.startsWith(v))) return false;
   if (JUDGMENTAL.some((v) => lower.includes(v))) return false;
+  if (FABRICATED.some((v) => lower.includes(v))) return false;
   /* disguised multi-step: chained instructions */
   if (/\bthen\b.*\bthen\b/.test(lower)) return false;
   const sentences = s.split(/[.!?]/).filter((x) => x.trim().length > 0).length;
@@ -315,8 +339,16 @@ function buildCandidates(ctx: GenCtx): CandidateAction[] {
   const out: CandidateAction[] = [];
   const seen = new Set<string>();
 
-  /* rank strategies for this moment */
-  const ranked = [...STRATEGIES]
+  const push = (action: string, strategy: StrategyId, source: CandidateAction["source"]) => {
+    const k = normalizeAction(action);
+    if (seen.has(k)) return;
+    if (!passesGuardrails(action)) return;
+    seen.add(k);
+    out.push({ action, strategy, size: ctx.size, costs: costsFor(strategy, a, ctx.size, ctx.profile), source });
+  };
+
+  /* rank COMPATIBLE strategies for this moment */
+  const ranked = STRATEGIES.filter((d) => strategyFitsTask(d.id, a))
     .map((def) => {
       const probe: CandidateAction = {
         action: "",
@@ -329,75 +361,62 @@ function buildCandidates(ctx: GenCtx): CandidateAction[] {
     })
     .sort((x, y) => y.score - x.score);
 
-  /* top-3 strategies × 2 wording salts each — enough variety, no explosion */
+  /* top-3 strategies × 3 wording salts — enough variety, no explosion */
   for (const cand of ranked.slice(0, 3)) {
-    for (let s = 0; s < 2; s++) {
+    for (let s = 0; s < 3; s++) {
       const action = renderStrategy(cand.id, a, ctx.salt + s * 7 + (cand.id.length % 3));
-      const k = normalizeAction(action);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push({
-        action,
-        strategy: cand.id,
-        size: ctx.size,
-        costs: costsFor(cand.id, a, ctx.size, ctx.profile),
-        source: "template",
-      });
+      if (action) push(action, cand.id, "template");
     }
   }
 
   /* always include the task-scoped decomposed rung for this size */
   const rung = decompose(a, ctx.size);
-  const rk = normalizeAction(rung);
-  if (!seen.has(rk)) {
-    const rungStrategy: StrategyId = ctx.size >= 3 ? "tiny" : ctx.size === 2 ? "tiny" : "direct";
-    out.push({
-      action: rung,
-      strategy: rungStrategy,
-      size: ctx.size,
-      costs: costsFor(rungStrategy, a, ctx.size, ctx.profile),
-      source: "decompose",
-    });
-  }
+  push(rung, ctx.size >= 2 ? "tiny" : "direct", "decompose");
 
-  return out.filter((c) => passesGuardrails(c.action));
+  return out;
 }
 
-const EFFORT_LABELS = ["medium", "medium", "small", "small", "tiny"] as const;
+/** Structurally distinct fallbacks — used only when everything else is exhausted. */
+const FRESH_FALLBACKS: Array<(n: number) => string> = [
+  (n) => `Give it exactly ${n} seconds, any way you like — then reassess.`,
+  (n) => `Set a ${n}-second timer and start mid-motion. No setup allowed.`,
+  (n) => `Count to ${n} slowly — on zero, make the first physical move.`,
+  (n) => `${n} seconds of motion, zero quality required. Go.`,
+  (n) => `One breath in, one out — then ${n} seconds, eyes on the thing.`,
+];
 
-/** Full reasoning pass: candidates → score → select → explain. */
+function freshFallback(ctx: GenCtx): string {
+  const secs = 10 + ((ctx.salt * 13 + ctx.memory.shown.length * 17) % 50);
+  for (let i = 0; i < FRESH_FALLBACKS.length; i++) {
+    const candidate = FRESH_FALLBACKS[(ctx.salt + i) % FRESH_FALLBACKS.length](secs + i * 5);
+    if (!wasShown(ctx.memory, candidate)) return candidate;
+  }
+  /* truly nothing left — any of them is still valid */
+  return FRESH_FALLBACKS[ctx.salt % FRESH_FALLBACKS.length](secs);
+}
+
+const EFFORT_LABELS: Record<Level, "tiny" | "small" | "medium"> = {
+  0: "medium",
+  1: "medium",
+  2: "small",
+  3: "small",
+  4: "tiny",
+};
+
+/** Full reasoning pass: candidates → score → dedupe → select → explain. */
 export function selectStep(ctx: GenCtx): Decision {
   const candidates = buildCandidates(ctx);
+  const scored = candidates.map((c) => ({ c, score: scoreCandidate(c, ctx) })).sort((x, y) => y.score - x.score);
 
-  /* guaranteed fallback survives any exhaustion */
-  const fallback: CandidateAction = {
-    action: `Give it exactly ${10 + ((ctx.salt * 13) % 50)} seconds, any way you like — then reassess.`,
-    strategy: "timebox",
-    size: ctx.size,
-    costs: {
-      progress: 0.4,
-      effort: 0.15,
-      initiation: 0.15,
-      ambiguity: 0.15,
-      cognitive: 0.1,
-      emotional: 0.1,
-      dependencies: 0,
-      confidence: 0.9,
-    },
-    source: "fallback",
-  };
+  /* HARD anti-repetition: never re-serve a shown action/intent while a distinct one exists */
+  const unshown = scored.filter(({ c }) => !wasShown(ctx.memory, c.action));
+  const winner = unshown[0]?.c;
+  const winnerScore = unshown[0]?.score ?? 0;
 
-  const pool = candidates.length ? candidates : [fallback];
-  const scored = pool.map((c) => ({ c, score: scoreCandidate(c, ctx) })).sort((x, y) => y.score - x.score);
-
-  /* hard anti-repetition: never re-serve a shown action while an unshown one exists */
-  const shownSet = new Set(ctx.memory.shown);
-  const unshown = scored.filter(({ c }) => !shownSet.has(normalizeAction(c.action)));
-  if (unshown.length === 0) {
-    /* every candidate exhausted — synthesize an always-fresh time-box */
-    const secs = 10 + ((ctx.salt * 13 + ctx.memory.shown.length * 17) % 50);
+  if (!winner) {
+    /* every candidate exhausted — synthesize a fresh, medium-neutral time-box */
     return {
-      action: `Give it exactly ${secs} seconds, any way you like — then reassess.`,
+      action: freshFallback(ctx),
       strategy: "timebox",
       size: ctx.size,
       note: null,
@@ -407,7 +426,6 @@ export function selectStep(ctx: GenCtx): Decision {
       barrierKind: ctx.barrier === "unclear" || ctx.barrier === "overwhelmed" ? "task" : "starting",
     };
   }
-  const winner = unshown[0].c;
 
   /* concise decision metadata — facts, not chain-of-thought */
   const topFactor =
@@ -424,7 +442,7 @@ export function selectStep(ctx: GenCtx): Decision {
     size: ctx.size,
     note: null,
     reason,
-    confidence: Math.round(Math.max(0.2, Math.min(0.95, unshown[0].score + 0.5)) * 100) / 100,
+    confidence: Math.round(Math.max(0.2, Math.min(0.95, winnerScore + 0.5)) * 100) / 100,
     expectedEffort: EFFORT_LABELS[ctx.size],
     barrierKind:
       ctx.barrier === "unclear" || ctx.barrier === "overwhelmed"
@@ -487,64 +505,95 @@ export function nextStep(
 
 /**
  * The Shrinker's "ladder" — generated on the fly: each rung is a
- * smaller size AND a different strategy, all specific to this
- * task, strictly descending toward the floor.
+ * smaller size AND a different move, all specific to this task.
+ *
+ * INVARIANT: a ladder never contains duplicate or near-duplicate
+ * actions while a genuinely distinct valid action is available.
+ * Dedupe is the same canonical intentKey mechanism as selection;
+ * collisions retry salts, then switch strategies, then fall back —
+ * and decompose rungs are injective per size by construction.
  */
 export function previewSteps(draft: Draft, profile: Profile | null, count = 4): PreviewStep[] {
+  const usedIntents = new Set<string>();
+  const take = (action: string | null): boolean => {
+    if (!action || !passesGuardrails(action)) return false;
+    const k = intentKey(action);
+    if (usedIntents.has(k)) return false;
+    usedIntents.add(k);
+    return true;
+  };
+
   if (draft.ladderOverride && draft.ladderOverride.length) {
-    return draft.ladderOverride
-      .filter((a) => passesGuardrails(a))
-      .slice(0, count)
-      .map((action, i) => ({ action, strategy: "direct", size: Math.min(4, draft.level + i) }));
+    /* AI-provided rungs pass through the SAME validation as local ones */
+    const out: PreviewStep[] = [];
+    draft.ladderOverride.slice(0, count).forEach((action, i) => {
+      if (take(action)) out.push({ action, strategy: "direct", size: clampLevel(draft.level + i) });
+    });
+    return out;
   }
+
   const out: PreviewStep[] = [];
-  let memory = draft.memory;
-  const used = new Set<StrategyId>();
+  const usedStrategies = new Set<StrategyId>();
+
   for (let i = 0; i < count; i++) {
-    const size = Math.min(4, draft.level + i);
+    const size = clampLevel(draft.level + i);
     const salt = 100 + i * 17 + draft.stepsDone;
-    /* every other rung is the task-scoped decomposition — guarantees a meaningful descent */
-    if (i % 2 === 1) {
-      const rung = decompose(draft.analysis, size);
-      out.push({ action: rung, strategy: size >= 2 ? "tiny" : "direct", size });
-      memory = remember(memory, rung, "tiny");
-      continue;
+    let placed = false;
+
+    const rung = decompose(draft.analysis, size);
+    const preferDecompose = i % 2 === 1;
+
+    /* attempt order alternates so the ladder reads strategy → rung → strategy → rung */
+    const tryDecompose = () => {
+      if (placed) return;
+      if (take(rung)) {
+        out.push({ action: rung, strategy: size >= 2 ? "tiny" : "direct", size });
+        placed = true;
+      }
+    };
+    const tryStrategies = () => {
+      if (placed) return;
+      const pool = STRATEGIES.filter((d) => strategyFitsTask(d.id, draft.analysis) && !usedStrategies.has(d.id))
+        .map((d) => ({
+          id: d.id,
+          score: scoreCandidate(
+            {
+              action: renderStrategy(d.id, draft.analysis, salt) ?? "",
+              strategy: d.id,
+              size,
+              costs: costsFor(d.id, draft.analysis, size, profile),
+              source: "template",
+            },
+            { analysis: draft.analysis, barrier: draft.blocker, size, memory: draft.memory, profile, salt },
+          ),
+        }))
+        .sort((a, b) => b.score - a.score);
+      for (const cand of pool) {
+        for (let bump = 0; bump < 8 && !placed; bump++) {
+          const action = renderStrategy(cand.id, draft.analysis, salt + bump * 7);
+          if (action && take(action)) {
+            usedStrategies.add(cand.id);
+            out.push({ action, strategy: cand.id, size });
+            placed = true;
+          }
+        }
+        if (placed) break;
+      }
+    };
+
+    if (preferDecompose) {
+      tryDecompose();
+      tryStrategies();
+      tryDecompose();
+    } else {
+      tryStrategies();
+      tryDecompose();
     }
-    const candidates = STRATEGIES.filter((d) => size >= d.sizes[0] && size <= d.sizes[1] + 1 && !used.has(d.id));
-    const pool = candidates.length ? candidates : STRATEGIES.filter((d) => !used.has(d.id));
-    const scored = pool
-      .map((d) => ({
-        id: d.id,
-        score: scoreCandidate(
-          {
-            action: renderStrategy(d.id, draft.analysis, salt),
-            strategy: d.id,
-            size,
-            costs: costsFor(d.id, draft.analysis, size, profile),
-            source: "template",
-          },
-          {
-            analysis: draft.analysis,
-            barrier: draft.blocker,
-            size,
-            memory,
-            profile,
-            salt,
-          },
-        ),
-      }))
-      .sort((a, b) => b.score - a.score);
-    const chosen = scored[0];
-    let action = renderStrategy(chosen.id, draft.analysis, salt);
-    let bump = 1;
-    while (memory.shown.includes(normalizeAction(action)) || out.some((p) => p.action === action)) {
-      action = renderStrategy(chosen.id, draft.analysis, salt + bump * 7);
-      bump += 1;
-      if (bump > 8) break;
+
+    if (!placed) {
+      const fb = freshFallback({ analysis: draft.analysis, barrier: draft.blocker, size, memory: draft.memory, profile, salt: salt + i });
+      if (take(fb)) out.push({ action: fb, strategy: "timebox", size });
     }
-    used.add(chosen.id);
-    memory = remember(memory, action, chosen.id);
-    out.push({ action, strategy: chosen.id, size });
   }
   return out;
 }

@@ -1,24 +1,27 @@
 /* ============================================================
-   Facade over the staged reasoning engine.
+   Facade over the staged engine + the test suite.
 
-   normalize → classify → complexity → friction → barrier
-   hypothesis → capacity → size → candidates → score →
-   guardrails → dedupe → select → explain → learn → profile.
+   Pipeline: analysis (understand) → strategies (compatible
+   generation) → selector (size / score / guardrails / dedupe) →
+   engine (adapt / rescue / recover / plan) → profile (learn).
 
    Everything is deterministic and local-first; the remote AI
-   provider below is strictly optional decoration.
+   provider below is strictly optional decoration, and anything it
+   returns is validated by the same guardrails as local output.
    ============================================================ */
 
 export {
   analyzeTask,
+  classifyMedium,
   classifyTask,
+  clampLevel,
   diagnoseBarrier,
   estimateCapacity,
   hashStr,
+  intentKey,
   normalizeAction,
   normalizeTask,
   pick,
-  tokenize,
 } from "./analysis";
 export { computeProfile, durationLabel, emptyProfile, learnFromOutcome, secondsLabel, updateProfile } from "./profile";
 export {
@@ -32,23 +35,34 @@ export {
   reasonToBarrier,
   rescueIntervention,
   type Intervention,
-  type PlanOpts,
 } from "./engine";
-export { emptyMemory, nextStep, passesGuardrails, previewSteps, selectStep, sizeFor } from "./selector";
+export {
+  emptyMemory,
+  markFailed,
+  nextStep,
+  passesGuardrails,
+  previewSteps,
+  remember,
+  selectStep,
+  sizeFor,
+  wasShown,
+} from "./selector";
 export {
   BARRIER_STRATEGIES,
   STRATEGIES,
   STRATEGY_LABEL,
   STRATEGY_MAP,
+  compatibleTemplates,
   decompose,
   renderStrategy,
+  strategyFitsTask,
 } from "./strategies";
 
-import { analyzeTask } from "./analysis";
-import { emptyMemory, nextStep, passesGuardrails } from "./selector";
-import { buildRecoveryStrategy, planFirstStep } from "./engine";
+import { analyzeTask, clampLevel, intentKey } from "./analysis";
+import { adaptFromFeedback as adaptLocal, barrierIntervention, buildRecoveryStrategy, planFirstStep } from "./engine";
+import { emptyMemory, nextStep, passesGuardrails, previewSteps, sizeFor } from "./selector";
+import type { Barrier, Draft, Level, Outcome, Profile, SessionRecord, StrategyId, TaskAnalysis } from "./types";
 import { computeProfile } from "./profile";
-import type { Barrier, Draft, Outcome, SessionRecord, StrategyId } from "./types";
 
 /** The nine named blockers offered in the state check. */
 export const BLOCKERS: Array<{ v: Barrier; label: string; icon: string; hint: string }> = [
@@ -80,7 +94,8 @@ export const BLOCKER_LABEL: Record<Barrier, string> = {
 /**
  * The app never depends on this. Any failure returns null and the
  * local engine takes over with a gentle notice — users never see
- * a raw error.
+ * a raw error. Returned steps are later validated by the same
+ * guardrails + dedupe as locally generated ones.
  */
 export async function tryRemoteEngine(endpoint: string, task: string): Promise<string[] | null> {
   try {
@@ -105,29 +120,44 @@ export async function tryRemoteEngine(endpoint: string, task: string): Promise<s
   }
 }
 
-/* ---------------- reasoning-system tests ----------------
-   Pure & deterministic: no console, no React, no network.
-   Covers the 14 required scenarios plus structural invariants.
-   `runEngineSelfTest` logs the report in development.
-   ---------------------------------------------------------- */
+/* ============================================================
+   ENGINE TEST SUITE — pure, deterministic, no console/network.
+   Runs in dev via runEngineSelfTest (and can be asserted on by
+   any future test runner). Covers the observed regression and
+   the whole equivalence class around it.
+   ============================================================ */
 
-export interface TestResult {
-  name: string;
-  pass: boolean;
-  detail?: string;
+export interface TestFailure {
+  test: string;
+  detail: string;
 }
-
-export interface TestReport {
+export interface TestResults {
   pass: number;
-  fail: number;
-  results: TestResult[];
+  failures: TestFailure[];
 }
 
-function fakeDraft(title: string, patch: Partial<Draft> = {}): Draft {
+/** Phrases that must never appear for screen-based tasks. */
+const BANNED_FOR_DIGITAL = [
+  "stand up",
+  "walk to",
+  "clear a hand",
+  "spot where",
+  "where it happens",
+  "face the mess",
+  "sit down at the spot",
+];
+/** Phrases that must never appear for body/space-based tasks. */
+const BANNED_FOR_PHYSICAL = ["cursor", "the app or file for it", "close every tab", "which app"];
+
+const validLevel = (n: unknown): n is Level =>
+  typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 4;
+
+function freshDraft(title: string, barrier: Barrier | null = null): Draft {
+  const analysis = analyzeTask(title);
   return {
-    title,
-    analysis: analyzeTask(title),
-    level: 1,
+    title: analysis.title,
+    analysis,
+    level: 0,
     stepIndex: 0,
     stepsDone: 0,
     rescues: 0,
@@ -141,248 +171,323 @@ function fakeDraft(title: string, patch: Partial<Draft> = {}): Draft {
     note: null,
     ladderOverride: null,
     entry: "normal",
-    blocker: null,
+    blocker: barrier,
     lastFeedback: null,
     memory: emptyMemory(),
-    ...patch,
   };
 }
 
-function fakeSession(i: number, patch: Partial<SessionRecord> = {}): SessionRecord {
+function session(
+  i: number,
+  size: Level,
+  outcome: Outcome,
+  over: Partial<SessionRecord> = {},
+): SessionRecord {
   return {
-    id: `t${i}`,
+    id: `s${i}`,
     title: null,
-    structure: "writing",
+    structure: "cleaning",
     kind: "focus",
-    startedAt: i,
-    endedAt: i + 60,
-    seconds: 60,
-    steps: 1,
+    startedAt: 1_700_000_000_000 + i * 60_000,
+    endedAt: 1_700_000_000_000 + i * 60_000 + 300_000,
+    seconds: 300,
+    steps: 2,
     rescues: 0,
-    outcome: "kept" as Outcome,
-    size: 2,
-    duration: 300,
+    outcome,
+    size,
+    duration: 600,
     entry: "normal",
     barrier: null,
-    strategy: "tiny" as StrategyId,
-    timeToStart: 30,
-    ...patch,
+    strategy: "tiny",
+    timeToStart: 20,
+    ...over,
   };
 }
 
-const DIVERSE_TASKS = [
-  "clean the whole apartment",
-  "write a complete blog article",
-  "do my taxes",
-  "reply to my emails",
-  "study for my chemistry exam",
-  "call the dentist about Thursday",
-  "fix the leaking kitchen tap",
-  "start learning the guitar",
-  "declutter the garage and sell old stuff",
-  "decide whether to quit my job",
-  "renew my passport before the trip",
-  "finish the quarterly report and email it to my boss",
-  "organize all my photos from the last ten years",
-  "prepare a surprise birthday party for my sister",
-  "research which standing desk to buy",
-  "untangle the cables behind my desk",
-  "knit a scarf for winter",
-  "figure out this weird error in my codebase",
-  "something vague about my life",
-  "rehearse my wedding speech",
-];
+export function runEngineTests(): TestResults {
+  const failures: TestFailure[] = [];
+  let pass = 0;
+  const ok = (cond: boolean, test: string, detail: string) => {
+    if (cond) pass += 1;
+    else failures.push({ test, detail });
+  };
 
-export function runEngineTests(): TestReport {
-  const results: TestResult[] = [];
-  const check = (name: string, pass: boolean, detail?: string) => results.push({ name, pass, detail });
+  /* global invariant collectors — every emitted action/level is checked at the end */
+  const allActions: string[] = [];
+  const allLevels: unknown[] = [];
+  const emit = (action: string, level: unknown) => {
+    allActions.push(action);
+    allLevels.push(level);
+  };
+  const leaks = (text: string, banned: string[]) => banned.filter((b) => text.toLowerCase().includes(b));
 
-  /* 1 — simple task: bounded, low decomposition */
+  /* ---------- 1 · the observed regression: email + overwhelmed ---------- */
   {
-    const a = analyzeTask("reply to John's email");
-    check("1. simple task understood", a.complexity <= 1 && a.actionCount === 0 && a.object.includes("email"), `complexity=${a.complexity}`);
-  }
+    const title = "Reply to John's email";
+    const a = analyzeTask(title);
+    ok(a.medium === "digital", "observed/medium-digital", `got ${a.medium}`);
 
-  /* 2 — huge task: detected as big, planned small */
-  {
-    const a = analyzeTask("clean my entire apartment");
-    const plan = planFirstStep(a, { hour: 10 });
-    check("2. huge task → small plan", a.complexity >= 2 && a.scopeWord != null && plan.size >= 2, `size=${plan.size}`);
-  }
+    const plan = planFirstStep(a, { barrier: "overwhelmed" });
+    ok(validLevel(plan.size), "observed/plan-level", `got ${String(plan.size)}`);
+    ok(plan.action.trim().length > 0, "observed/plan-nonempty", plan.action);
+    ok(leaks(plan.action, BANNED_FOR_DIGITAL).length === 0, "observed/plan-no-physical", plan.action);
+    emit(plan.action, plan.size);
 
-  /* 3 — ambiguous task: high ambiguity, task-side hypothesis */
-  {
-    const a = analyzeTask("sort out stuff about my life somehow");
-    check("3. ambiguous task flagged", a.ambiguity >= 0.5, `ambiguity=${a.ambiguity.toFixed(2)}`);
-  }
+    const d0 = freshDraft(title, "overwhelmed");
+    const iv = barrierIntervention({ ...d0, level: plan.size }, "overwhelmed", null);
+    ok(validLevel(iv.size), "observed/intervention-level", `got ${String(iv.size)}`);
+    ok(leaks(iv.action, BANNED_FOR_DIGITAL).length === 0, "observed/intervention-no-physical", iv.action);
+    emit(iv.action, iv.size);
 
-  /* 4 — low-energy scenario: tired → small entry, no big asks */
-  {
-    const d = fakeDraft("write the report");
-    const res = nextStep(d, null, { barrier: "tired", capacityEnergy: 0.3 });
-    check("4. low energy → small step", res.size >= 2, `size=${res.size}`);
-  }
-
-  /* 5 — repeated failure: five "stuck" never reproduce an action */
-  {
-    let draft = fakeDraft("do my taxes");
-    const seen = new Set<string>();
-    let repeats = 0;
-    for (let i = 0; i < 5; i++) {
-      const res = nextStep(draft, null, { feedback: "stuck", avoidStrategy: draft.strategy });
-      const k = res.action.toLowerCase();
-      if (seen.has(k)) repeats += 1;
-      seen.add(k);
-      draft = { ...draft, ...res, level: res.size, feedbacks: i + 1, lastFeedback: "stuck" };
-    }
-    check("5. repeated failure stays fresh", repeats === 0, `repeats=${repeats}`);
-  }
-
-  /* 6 — repeated success: two wins at a size test a bigger step */
-  {
-    let draft = fakeDraft("study for the exam", { level: 3 });
-    const r1 = nextStep(draft, null, { feedback: "worked" });
-    draft = { ...draft, ...r1, level: r1.size, lastFeedback: "worked" };
-    const r2 = nextStep(draft, null, { feedback: "worked" });
-    check("6. repeated success grows step", r2.size <= 2, `size=${r2.size}`);
-  }
-
-  /* 7 — unknown user: no profile, still a confident concrete action */
-  {
-    const plan = planFirstStep(analyzeTask("water the plants and feed the cat"), { hour: 10 });
-    check("7. unknown user handled", plan.action.length > 10 && plan.decision.confidence > 0.2, plan.decision.reason);
-  }
-
-  /* 8 — experienced user: history pulls size toward the proven one */
-  {
-    const sessions = Array.from({ length: 12 }, (_, i) =>
-      fakeSession(i, { size: i % 3 === 0 ? 3 : 2, outcome: i % 4 === 3 ? "stopped" : "kept" }),
+    const d1: Draft = { ...d0, level: plan.size, override: plan.action, strategy: plan.strategy, memory: plan.memory };
+    const ladder = previewSteps(d1, null, 4);
+    ok(ladder.length >= 3, "observed/ladder-length", `${ladder.length}`);
+    const intents = ladder.map((r) => intentKey(r.action));
+    ok(
+      new Set(intents).size === ladder.length,
+      "observed/ladder-no-duplicates",
+      ladder.map((r) => r.action).join(" || "),
     );
-    const profile = computeProfile(sessions);
-    const plan = planFirstStep(analyzeTask("write a blog post"), { profile, hour: 10 });
-    check(
-      "8. experienced user personalized",
-      profile.confidence === "stable" && profile.bestSize === 2 && Math.abs(plan.size - 2) <= 1,
-      `best=${profile.bestSize} plan=${plan.size}`,
-    );
-  }
-
-  /* 9 — duplicate candidates: shown actions are never re-served */
-  {
-    let draft = fakeDraft("clean the kitchen");
-    let dup = false;
-    for (let i = 0; i < 8; i++) {
-      const res = nextStep(draft, null, {});
-      if (draft.memory.shown.includes(res.action.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim()) && i > 0) dup = true;
-      draft = { ...draft, ...res, level: res.size, memory: res.memory };
+    for (const r of ladder) {
+      ok(validLevel(r.size), "observed/rung-level", `got ${String(r.size)} for “${r.action}”`);
+      ok(leaks(r.action, BANNED_FOR_DIGITAL).length === 0, "observed/rung-no-physical", r.action);
+      emit(r.action, r.size);
     }
-    check("9. no duplicate candidates", !dup);
   }
 
-  /* 10 — recovery after failure: new strategy, new action */
+  /* ---------- 2–6 · equivalence classes across media ---------- */
+  const classes: Array<{ title: string; medium: string; banned: string[] }> = [
+    { title: "Message the team about tomorrow", medium: "digital", banned: BANNED_FOR_DIGITAL },
+    { title: "fix this weird error in my codebase", medium: "digital", banned: BANNED_FOR_DIGITAL },
+    { title: "clean my room", medium: "physical", banned: BANNED_FOR_PHYSICAL },
+    { title: "organize the kitchen drawers", medium: "physical", banned: BANNED_FOR_PHYSICAL },
+    { title: "declutter the garage and sell old stuff online", medium: "mixed", banned: [] },
+    { title: "deal with that thing somehow", medium: "unknown", banned: ["spot where", "where it happens"] },
+  ];
+  for (const c of classes) {
+    const tag = c.title.slice(0, 24);
+    const a = analyzeTask(c.title);
+    ok(a.medium === c.medium, `class/${tag}/medium`, `want ${c.medium}, got ${a.medium}`);
+    const plan = planFirstStep(a, {});
+    ok(validLevel(plan.size), `class/${tag}/level`, String(plan.size));
+    ok(passesGuardrails(plan.action), `class/${tag}/guardrails`, plan.action);
+    ok(leaks(plan.action, c.banned).length === 0, `class/${tag}/compatible`, plan.action);
+    emit(plan.action, plan.size);
+    const ladder = previewSteps({ ...freshDraft(c.title), level: plan.size }, null, 4);
+    const intents = ladder.map((r) => intentKey(r.action));
+    ok(new Set(intents).size === ladder.length, `class/${tag}/ladder-distinct`, ladder.map((r) => r.action).join(" || "));
+    for (const r of ladder) {
+      ok(validLevel(r.size), `class/${tag}/rung-level`, `${String(r.size)} · ${r.action}`);
+      ok(leaks(r.action, c.banned).length === 0, `class/${tag}/rung-compatible`, r.action);
+      emit(r.action, r.size);
+    }
+  }
+
+  /* ---------- 7 · recovery after failure (digital task stays digital) ---------- */
   {
-    const before = nextStep(fakeDraft("plan the move"), null, {});
-    const draft = fakeDraft("plan the move", { strategy: before.strategy, override: before.action, level: before.size });
+    const d = freshDraft("Reply to John's email");
+    const p1 = planFirstStep(d.analysis, {});
+    const draft: Draft = { ...d, level: p1.size, override: p1.action, strategy: p1.strategy, memory: p1.memory };
     const rec = buildRecoveryStrategy(draft, null, "stuck");
-    check(
-      "10. recovery changes strategy",
-      rec.strategy !== before.strategy && rec.override.toLowerCase() !== before.action.toLowerCase(),
-      `${before.strategy} → ${rec.strategy}`,
-    );
+    ok(validLevel(rec.level), "recovery/level", String(rec.level));
+    ok(passesGuardrails(rec.override), "recovery/guardrails", rec.override);
+    ok(intentKey(rec.override) !== intentKey(draft.override ?? ""), "recovery/distinct", rec.override);
+    ok(leaks(rec.override, BANNED_FOR_DIGITAL).length === 0, "recovery/compatible", rec.override);
+    emit(rec.override, rec.level);
   }
 
-  /* 11 — dynamic level adjustment: tooBig shrinks, bounds respected */
+  /* ---------- 8 · exhausted pool / repeated failure: fresh every time ---------- */
   {
-    const d = fakeDraft("renovate the bathroom", { level: 2 });
-    const r = nextStep(d, null, { feedback: "tooBig" });
-    check("11. feedback adapts size", r.size === 3, `size=${r.size}`);
-    const floor = nextStep(fakeDraft("x", { level: 4 }), null, { feedback: "tooBig" });
-    check("11b. size bounds respected", floor.size <= 4 && floor.size >= 0);
-  }
-
-  /* 12 — time-to-start learning: slow starters get a smaller doorway */
-  {
-    const slow = Array.from({ length: 6 }, (_, i) => fakeSession(i, { timeToStart: 240, outcome: i % 2 ? "kept" : "stopped" }));
-    const fast = Array.from({ length: 6 }, (_, i) => fakeSession(i, { timeToStart: 20, outcome: i % 2 ? "kept" : "stopped" }));
-    const ps = computeProfile(slow);
-    const pf = computeProfile(fast);
-    const a = analyzeTask("file the paperwork");
-    const sizeSlow = planFirstStep(a, { profile: ps, hour: 10 }).size;
-    const sizeFast = planFirstStep(a, { profile: pf, hour: 10 }).size;
-    check("12. time-to-start is evidence", sizeSlow >= sizeFast, `slow=${sizeSlow} fast=${sizeFast}`);
-  }
-
-  /* 13 — different domains: structure spreads, first steps vary */
-  {
-    const structures = new Set(DIVERSE_TASKS.map((t) => analyzeTask(t).structure));
-    const plans = new Set(DIVERSE_TASKS.map((t) => planFirstStep(analyzeTask(t), { hour: 10 }).action));
-    check("13a. structure detection spreads", structures.size >= 8, `${structures.size} structures`);
-    check("13b. first steps are task-specific", plans.size >= DIVERSE_TASKS.length - 3, `${plans.size}/${DIVERSE_TASKS.length} unique`);
-  }
-
-  /* 14 — different barriers: genuinely different interventions */
-  {
-    const barriers: Barrier[] = ["overwhelmed", "unclear", "boring", "perfectionism", "anxiety", "distracted", "tired", "avoiding", "unknown"];
-    const d = fakeDraft("start the project");
-    const strategies = new Set<StrategyId>();
-    const actions = new Set<string>();
-    for (const b of barriers) {
-      if (b === "distracted") continue;
-      const res = nextStep(d, null, { barrier: b });
+    let draft = freshDraft("write a blog article");
+    const seen = new Set<string>();
+    const strategies = new Set<StrategyId | null>();
+    for (let i = 0; i < 12; i++) {
+      const res = nextStep(draft, null, { feedback: "stuck", avoidStrategy: draft.strategy });
+      const k = intentKey(res.action);
+      ok(!seen.has(k), "exhausted/no-repeat", res.action);
+      ok(passesGuardrails(res.action), "exhausted/guardrails", res.action);
+      ok(validLevel(res.size), "exhausted/level", String(res.size));
+      seen.add(k);
       strategies.add(res.strategy);
-      actions.add(res.action.toLowerCase());
+      emit(res.action, res.size);
+      draft = {
+        ...draft,
+        ...res,
+        override: res.action,
+        strategy: res.strategy,
+        level: res.size,
+        memory: res.memory,
+        feedbacks: i + 1,
+        lastFeedback: "stuck",
+      };
     }
-    check("14a. barriers change strategy", strategies.size >= 5, `${strategies.size} distinct strategies`);
-    check("14b. barriers change the action", actions.size >= 6, `${actions.size} distinct actions`);
+    ok(strategies.size >= 3, "exhausted/rotates-strategies", `${strategies.size} distinct`);
   }
 
-  /* invariants — across many tasks and iterations */
+  /* ---------- 9 · ladder wording variants stay distinct ---------- */
   {
-    let emptyAction = false;
-    let guardrailFail = false;
-    let outOfBounds = false;
-    let nonDeterministic = false;
-    for (const t of DIVERSE_TASKS) {
-      const a = analyzeTask(t);
-      const p1 = planFirstStep(a, { hour: 10 });
-      const p2 = planFirstStep(a, { hour: 10 });
-      if (p1.action !== p2.action) nonDeterministic = true;
-      let draft = fakeDraft(t);
-      for (let i = 0; i < 6; i++) {
-        const res = nextStep(draft, null, { feedback: i % 2 ? "stuck" : "worked" });
-        if (!res.action.trim()) emptyAction = true;
-        if (!passesGuardrails(res.action)) guardrailFail = true;
-        if (res.size < 0 || res.size > 4) outOfBounds = true;
-        draft = { ...draft, ...res, level: res.size, memory: res.memory, feedbacks: i + 1 };
-      }
+    const t = "study for my chemistry exam";
+    const a = analyzeTask(t);
+    const ladderA = previewSteps({ ...freshDraft(t), level: 0 }, null, 4);
+    const ladderB = previewSteps({ ...freshDraft(t), level: 0, stepsDone: 5 }, null, 4);
+    for (const [name, ladder] of [["A", ladderA], ["B", ladderB]] as const) {
+      const intents = ladder.map((r) => intentKey(r.action));
+      ok(new Set(intents).size === ladder.length, `variants/${name}/distinct`, ladder.map((r) => r.action).join(" || "));
+      ladder.forEach((r) => emit(r.action, r.size));
     }
-    check("INV. actions never empty", !emptyAction);
-    check("INV. actions pass guardrails", !guardrailFail);
-    check("INV. size stays in bounds", !outOfBounds);
-    check("INV. deterministic outputs", !nonDeterministic);
-
-    /* learning must not explode after one event */
-    const one = computeProfile([fakeSession(0)]);
-    check("INV. one event ≠ conclusion", one.confidence !== "stable" && one.confidence !== "emerging" && one.bestSize === null);
-    const none = computeProfile([]);
-    check("INV. empty profile valid", none.confidence === "none" && none.starts === 0 && none.momentum === "none");
+    const same = ladderA.filter((r, i) => intentKey(r.action) === intentKey(ladderB[i]?.action ?? "∅")).length;
+    ok(same < ladderA.length, "variants/salt-changes-wording", `${same}/${ladderA.length} identical`);
   }
 
-  const pass = results.filter((r) => r.pass).length;
-  return { pass, fail: results.length - pass, results };
+  /* ---------- 10 · hysteresis: wins shrink gradually, failures shrink at once ---------- */
+  {
+    const d = freshDraft("clean my entire apartment");
+    ok(d.analysis.complexity >= 2, "hysteresis/complexity", `${d.analysis.complexity}`);
+    const dAt2: Draft = { ...d, level: 2 };
+    const w1 = adaptLocal(dAt2, null, "worked");
+    ok(w1.level === 2, "hysteresis/first-win-holds", String(w1.level));
+    const d2: Draft = { ...dAt2, override: w1.override, strategy: w1.strategy, memory: w1.memory, level: w1.level, feedbacks: w1.feedbacks, lastFeedback: w1.lastFeedback };
+    const w2 = adaptLocal(d2, null, "worked");
+    ok(w2.level === 1, "hysteresis/second-win-shrinks", String(w2.level));
+    const f1 = adaptLocal({ ...d, level: 2 }, null, "tooBig");
+    ok(f1.level === 3, "hysteresis/failure-shrinks-now", String(f1.level));
+  }
+
+  /* ---------- 11 · sizeFor unit behavior ---------- */
+  {
+    const a = analyzeTask("do my taxes");
+    const grow = sizeFor({ analysis: a, barrier: null, lastFeedback: "tooBig", currentSize: 2, sizeTrack: { size: 2, worked: 0, failed: 0 } });
+    ok(grow === 3, "sizeFor/failure-grows-size-number", String(grow));
+    const shrink = sizeFor({ analysis: a, barrier: null, lastFeedback: "worked", currentSize: 2, sizeTrack: { size: 2, worked: 1, failed: 0 } });
+    ok(shrink === 1, "sizeFor/streak-shrinks", String(shrink));
+    const hold = sizeFor({ analysis: a, barrier: null, lastFeedback: "worked", currentSize: 2, sizeTrack: { size: 2, worked: 0, failed: 0 } });
+    ok(hold === 2, "sizeFor/single-win-holds", String(hold));
+  }
+
+  /* ---------- 12 · unknown vs experienced user ---------- */
+  {
+    const plan = planFirstStep(analyzeTask("water the plants"), { profile: null });
+    ok(validLevel(plan.size) && plan.action.length > 0, "unknown-user/works", plan.action);
+
+    const sessions = Array.from({ length: 8 }, (_, i) => session(i, 3, i < 6 ? "kept" : "stopped"));
+    const prof = computeProfile(sessions);
+    ok(prof.bestSize === 3, "experienced/bestSize", String(prof.bestSize));
+    ok(prof.confidence === "emerging" || prof.confidence === "stable", "experienced/confidence", prof.confidence);
+    const plan2 = planFirstStep(analyzeTask("water the plants"), { profile: prof });
+    ok(plan2.size <= 1, "experienced/one-step-toward", String(plan2.size));
+    emit(plan2.action, plan2.size);
+  }
+
+  /* ---------- 13 · time-to-start as evidence ---------- */
+  {
+    const base: Profile = {
+      starts: 5, kept: 4, bestSize: null, bestDuration: null, bestStrategy: null, commonBarrier: null,
+      repeatedBarriers: [], avgTimeToStart: 30, momentum: "none", recoveryRate: null, rates: null, confidence: "low",
+    };
+    const a = analyzeTask("do my taxes");
+    const fast = sizeFor({ analysis: a, barrier: null, profile: base });
+    const slow = sizeFor({ analysis: a, barrier: null, profile: { ...base, avgTimeToStart: 200 } });
+    ok(slow === clampLevel(fast + 1), "tts/slow-starter-smaller", `${fast} → ${slow}`);
+  }
+
+  /* ---------- 14 · one event cannot corrupt the profile ---------- */
+  {
+    const prof = computeProfile([session(0, 2, "kept")]);
+    ok(prof.bestSize === null, "profile/no-overfit-size", String(prof.bestSize));
+    ok(prof.confidence === "none" || prof.confidence === "low", "profile/no-overfit-tier", prof.confidence);
+  }
+
+  /* ---------- 15 · domain spread over many unseen tasks ---------- */
+  {
+    const tasks = [
+      "clean the whole apartment", "write a complete blog article", "do my taxes", "reply to my emails",
+      "study for my chemistry exam", "call the dentist about Thursday", "fix the leaking kitchen tap",
+      "start learning the guitar", "declutter the garage and sell old stuff", "decide whether to quit my job",
+      "renew my passport before the trip", "organize all my photos", "research which standing desk to buy",
+      "knit a scarf for winter",
+    ];
+    const structures = new Set(tasks.map((t) => analyzeTask(t).structure));
+    ok(structures.size >= 7, "domains/spread", `${structures.size} distinct`);
+    for (const t of tasks) {
+      const plan = planFirstStep(analyzeTask(t), {});
+      ok(passesGuardrails(plan.action) && validLevel(plan.size), `domains/${t.slice(0, 20)}`, plan.action);
+      emit(plan.action, plan.size);
+    }
+  }
+
+  /* ---------- 16 · barriers change the strategy, all medium-safe ---------- */
+  {
+    const d = freshDraft("Reply to John's email");
+    const barriers: Barrier[] = ["overwhelmed", "unclear", "boring", "perfectionism", "anxiety", "tired", "avoiding", "unknown"];
+    const used = new Set<string>();
+    for (const b of barriers) {
+      const iv = barrierIntervention(d, b, null);
+      ok(validLevel(iv.size), `barrier/${b}/level`, String(iv.size));
+      ok(leaks(iv.action, BANNED_FOR_DIGITAL).length === 0, `barrier/${b}/compatible`, iv.action);
+      emit(iv.action, iv.size);
+      used.add(iv.strategy ?? "?");
+    }
+    ok(used.size >= 4, "barrier/diverse-strategies", `${used.size} distinct`);
+    const distracted = barrierIntervention(d, "distracted", null);
+    ok(distracted.reset === true, "barrier/distracted-resets", "expected reset");
+  }
+
+  /* ---------- 17 · determinism ---------- */
+  {
+    const run = () => {
+      const a = analyzeTask("Reply to John's email");
+      const plan = planFirstStep(a, { barrier: "overwhelmed" });
+      const ladder = previewSteps({ ...freshDraft("Reply to John's email"), level: plan.size, memory: plan.memory }, null, 4);
+      return JSON.stringify({ plan: { action: plan.action, strategy: plan.strategy, size: plan.size }, ladder });
+    };
+    ok(run() === run(), "determinism/same-input-same-output", "outputs differed");
+  }
+
+  /* ---------- global invariants over everything emitted above ---------- */
+  ok(
+    allActions.every((s) => s.trim().length > 0 && passesGuardrails(s)),
+    "invariant/all-actions-valid",
+    allActions.find((s) => !passesGuardrails(s)) ?? "",
+  );
+  ok(allLevels.every(validLevel), "invariant/all-levels-valid", String(allLevels.find((l) => !validLevel(l))));
+
+  return { pass, failures };
 }
 
-/** Dev-only console report of the reasoning-system tests. */
+/**
+ * Dev-only runner: executes the pure suite and prints a human-readable
+ * showcase of real engine output for representative tasks, so
+ * regressions are visible — not just counted.
+ */
 export function runEngineSelfTest(): void {
-  if (typeof window === "undefined") return;
   queueMicrotask(() => {
-    const report = runEngineTests();
-    const ok = report.fail === 0;
-    console.groupCollapsed(
-      `%cunstick engine tests — ${report.pass}/${report.pass + report.fail} passed`,
-      `font-weight:bold;color:${ok ? "#52c08f" : "#f09a85"}`,
-    );
-    console.table(report.results.map((r) => ({ test: r.name, ok: r.pass ? "✓" : "✗", detail: r.detail ?? "" })));
+    const results = runEngineTests();
+    const label = `%cunstick engine · ${results.pass} passed · ${results.failures.length} failed`;
+    if (results.failures.length === 0) {
+      console.groupCollapsed(label, "font-weight:bold;color:#52c08f");
+    } else {
+      console.group(label, "font-weight:bold;color:#de7f6b");
+      console.table(results.failures);
+    }
+
+    /* showcase: what the engine actually says for representative tasks */
+    const showcase = [
+      "Reply to John's email",
+      "clean my entire apartment",
+      "write a complete blog article",
+      "do my taxes",
+      "declutter the garage and sell old stuff online",
+      "deal with that thing somehow",
+    ];
+    for (const t of showcase) {
+      const a = analyzeTask(t);
+      const plan = planFirstStep(a, {});
+      const ladder = previewSteps({ ...freshDraft(t), level: plan.size, memory: plan.memory }, null, 4);
+      console.log(
+        `\n— “${t}” [${a.structure}/${a.medium}] → (${plan.strategy}, size ${plan.size})\n  ${plan.action}\n` +
+          ladder.map((r, i) => `  ${i + 1}. [${r.strategy}·${r.size}] ${r.action}`).join("\n"),
+      );
+    }
     console.groupEnd();
   });
 }

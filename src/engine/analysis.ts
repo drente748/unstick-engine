@@ -1,4 +1,4 @@
-import type { Barrier, BarrierKind, Capacity, Structure, TaskAnalysis } from "./types";
+import type { Barrier, BarrierKind, Capacity, Level, Medium, Structure, TaskAnalysis } from "./types";
 
 /* ============================================================
    Stages 1–5 of the pipeline: normalize → classify →
@@ -160,6 +160,38 @@ function extractObject(title: string, words: string[], verb: string | null): str
 
 const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 
+/**
+ * THE numeric safety gate for the whole engine. Every producer of a
+ * step size routes through here, so a size can never reach the UI as
+ * undefined, NaN, negative or > 4. Non-finite input is a contract
+ * violation that cannot happen upstream any more; the middle of the
+ * ladder is the least-surprising mapped value if it ever did.
+ */
+export function clampLevel(n: number): Level {
+  if (!Number.isFinite(n)) return 2;
+  return Math.round(Math.max(0, Math.min(4, n))) as Level;
+}
+
+/**
+ * Classify WHERE the task happens — the hard compatibility dimension.
+ * Digital evidence: digital wording or an app requirement. Physical
+ * evidence: physical wording or a named location. A named tool alone
+ * is NOT digital evidence (a guitar is a tool, not a screen).
+ */
+export function classifyMedium(
+  digital: boolean,
+  physical: boolean,
+  needsApp: boolean,
+  place: string | null,
+): Medium {
+  const dig = digital || needsApp;
+  const phys = physical || place != null;
+  if (dig && phys) return "mixed";
+  if (dig) return "digital";
+  if (phys) return "physical";
+  return "unknown";
+}
+
 /** Stages 3–4 — complexity, friction and everything that shapes initiation. */
 export function analyzeTask(rawTitle: string): TaskAnalysis {
   const title = normalizeTask(rawTitle);
@@ -212,6 +244,8 @@ export function analyzeTask(rawTitle: string): TaskAnalysis {
   const emotionalFriction = clamp01(stakes * 0.22 + (person ? 0.12 : 0) + (scopeWord ? 0.15 : 0) + (vague ? 0.1 : 0));
   const avoidanceTriggers =
     (scopeWord ? 1 : 0) + (vague ? 1 : 0) + (hasDeadline ? 1 : 0) + (person ? 1 : 0) + (stakes > 0 ? 1 : 0);
+  const place = findFirst(words, PLACES);
+  const medium = classifyMedium(digital, physical, needsApp, place);
 
   return {
     title,
@@ -219,7 +253,7 @@ export function analyzeTask(rawTitle: string): TaskAnalysis {
     verb: v?.verb ?? null,
     verbPhrase: v?.phrase ?? null,
     object: extractObject(title, words, v?.verb ?? null),
-    place: findFirst(words, PLACES),
+    place,
     tool: findFirst(words, TOOLS),
     person,
     complexity,
@@ -229,6 +263,7 @@ export function analyzeTask(rawTitle: string): TaskAnalysis {
     dependencies,
     physical,
     digital,
+    medium,
     needsApp,
     clearFirstStep,
     emotionalFriction,
@@ -338,4 +373,27 @@ export function pick<T>(arr: T[], seed: number): T {
 /** Normalizes an action so near-identical recommendations can be detected. */
 export function normalizeAction(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * THE canonical semantic-duplicate fingerprint.
+ *
+ * Exact normalization (normalizeAction) catches re-serves of the same
+ * wording; intentKey additionally collapses QUANTIFIER/NUMERAL variants
+ * ("Give it exactly 30 seconds" ≡ "Give it 45 seconds") while keeping
+ * every verb and noun, so genuinely different actions never collide.
+ * Every generator (select, ladder, recovery, fallback) dedupes on
+ * this — there is exactly one dedupe mechanism in the codebase.
+ */
+const INTENT_DROP =
+  /\b(one|two|three|four|five|six|single|exactly|just|only|roughly|really|very|even|right|whole|entire|today|now)\b/g;
+
+export function intentKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\b\d+\b/g, "N")
+    .replace(INTENT_DROP, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

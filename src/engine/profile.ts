@@ -1,3 +1,4 @@
+import { clampLevel } from "./analysis";
 import type { Barrier, ConfidenceTier, Profile, Rate, SessionRecord, StrategyId } from "./types";
 
 /* ============================================================
@@ -144,7 +145,7 @@ export function computeProfile(sessions: SessionRecord[]): Profile {
   return {
     starts,
     kept: base.kept,
-    bestSize: bs != null ? Number(bs) : null,
+    bestSize: bs != null ? clampLevel(Number(bs)) : null,
     bestDuration: bd != null ? Number(bd) : null,
     bestStrategy: bstr as StrategyId | null,
     commonBarrier,

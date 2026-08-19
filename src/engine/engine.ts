@@ -1,4 +1,4 @@
-import { diagnoseBarrier, estimateCapacity } from "./analysis";
+import { clampLevel, diagnoseBarrier, estimateCapacity } from "./analysis";
 import { markFailed, nextStep } from "./selector";
 import { STRATEGY_LABEL } from "./strategies";
 import type {
@@ -9,6 +9,7 @@ import type {
   Draft,
   EngineMemory,
   FeedbackKind,
+  Level,
   Profile,
   StuckReason,
   TaskAnalysis,
@@ -54,8 +55,8 @@ function capacityFor(draft: Draft, profile: Profile | null, opts: PipelineOpts):
 }
 
 function withDecision(
-  res: { action: string; strategy: Draft["strategy"]; size: number; note: string | null } & Partial<DecisionMeta> & { memory: EngineMemory },
-): { override: string; level: number; strategy: Draft["strategy"]; note: string | null; memory: EngineMemory; decision: DecisionMeta } {
+  res: { action: string; strategy: Draft["strategy"]; size: Level; note: string | null } & Partial<DecisionMeta> & { memory: EngineMemory },
+): { override: string; level: Level; strategy: Draft["strategy"]; note: string | null; memory: EngineMemory; decision: DecisionMeta } {
   return {
     override: res.action,
     level: res.size,
@@ -78,7 +79,7 @@ export function adaptFromFeedback(
   kind: FeedbackKind,
 ): {
   override: string;
-  level: number;
+  level: Level;
   strategy: Draft["strategy"];
   note: string;
   memory: Draft["memory"];
@@ -119,7 +120,7 @@ export function adaptFromFeedback(
 export function advanceStep(
   draft: Draft,
   profile: Profile | null,
-): { override: string; level: number; strategy: Draft["strategy"]; memory: Draft["memory"]; stepsDone: number; decision: DecisionMeta } {
+): { override: string; level: Level; strategy: Draft["strategy"]; memory: Draft["memory"]; stepsDone: number; decision: DecisionMeta } {
   const base: Draft = { ...draft, stepsDone: draft.stepsDone + 1, lastFeedback: "worked" };
   const capacity = capacityFor(base, profile, {});
   const res = nextStep(base, profile, { feedback: "worked", capacityEnergy: capacity.energy });
@@ -158,7 +159,7 @@ export function reasonToBarrier(r: StuckReason): Barrier {
 export interface Intervention {
   action: string;
   strategy: Draft["strategy"];
-  size: number;
+  size: Level;
   note: string | null;
   headline: string;
   memory: Draft["memory"];
@@ -245,7 +246,7 @@ export function buildRecoveryStrategy(
   why: FeedbackKind | "drifted" = "drifted",
 ): {
   override: string;
-  level: number;
+  level: Level;
   strategy: Draft["strategy"];
   memory: Draft["memory"];
   note: string;
@@ -284,7 +285,7 @@ export interface PlanOpts {
 export function planFirstStep(
   analysis: TaskAnalysis,
   opts: PlanOpts = {},
-): { action: string; strategy: Draft["strategy"]; size: number; note: string | null; memory: Draft["memory"]; decision: DecisionMeta } {
+): { action: string; strategy: Draft["strategy"]; size: Level; note: string | null; memory: Draft["memory"]; decision: DecisionMeta } {
   const hypo = diagnoseBarrier(analysis, opts.barrier ?? null);
   const barrier = opts.barrier ?? (hypo.kind === "task" ? hypo.barrier : null);
   const hour = opts.hour ?? new Date().getHours();
@@ -309,7 +310,14 @@ export function planFirstStep(
     entry: "normal",
     blocker: barrier,
     lastFeedback: null,
-    memory: { shown: [], strategies: [], failed: [], failedActions: [], sizeTrack: { size: -1, worked: 0, failed: 0 } },
+    memory: {
+      shown: [],
+      shownIntents: [],
+      strategies: [],
+      failed: [],
+      failedActions: [],
+      sizeTrack: { size: null, worked: 0, failed: 0 },
+    },
   };
 
   const res = nextStep(draft, opts.profile ?? null, {
@@ -319,8 +327,7 @@ export function planFirstStep(
     saltBump: 1,
   });
 
-  let size = res.size + (opts.extraShrink ?? 0);
-  size = Math.max(0, Math.min(4, size));
+  const size = clampLevel(res.size + (opts.extraShrink ?? 0));
   if (size !== res.size) {
     /* re-roll at the forced size */
     const res2 = nextStep({ ...draft, level: size, memory: res.memory }, opts.profile ?? null, {
