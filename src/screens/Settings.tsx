@@ -166,6 +166,12 @@ export default function Settings() {
         <Row title="Body double messages" desc="The occasional “still here.” during company mode.">
           <Toggle on={s.doubleMsgs} onChange={(v) => set({ doubleMsgs: v })} label="Body double messages" />
         </Row>
+        <Row
+          title="Learn from my sessions"
+          desc="On-device only: notices which step sizes and moves get you going. Off = every session is a fresh start."
+        >
+          <Toggle on={s.learningEnabled} onChange={(v) => set({ learningEnabled: v })} label="Learn from my sessions" />
+        </Row>
         <Row title="Remember task names" desc="Off = session history stores no task text at all.">
           <Toggle on={s.saveTitles} onChange={(v) => set({ saveTitles: v })} label="Remember task names" />
         </Row>

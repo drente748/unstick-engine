@@ -31,6 +31,7 @@ import {
   buildRecoveryStrategy,
   computeProfile,
   emptyMemory,
+  emptyProfile,
   planFirstStep,
   reasonToBarrier,
   rescueIntervention,
@@ -562,7 +563,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [endpoint],
   );
 
-  const profile = useMemo(() => computeProfile(state.sessions), [state.sessions]);
+  /* Learning is opt-out: when disabled, the engine gets an empty profile
+     and treats every session as a fresh start. Baseline behavior stays. */
+  const profile = useMemo(
+    () => (state.settings.learningEnabled ? computeProfile(state.sessions) : emptyProfile(state.sessions.length)),
+    [state.sessions, state.settings.learningEnabled],
+  );
 
   return <AppCtx.Provider value={{ state, dispatch, submitTask, profile }}>{children}</AppCtx.Provider>;
 }

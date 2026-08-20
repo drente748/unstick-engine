@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Unstick Decision Log Entry",
+  "description": "Privacy-safe decision trace for the local task-start engine. Lives ONLY on-device (in-memory ring buffer, capped at 64 entries). Raw task text is replaced by a non-reversible FNV-1a hash. Nothing here is ever transmitted anywhere by default.",
+  "type": "object",
+  "required": ["decisionId", "sessionId", "policyVersion", "analysisVersion", "chosenAction", "chosenStrategy", "chosenLevel", "selectionProbability", "shownAt"],
+  "properties": {
+    "decisionId": { "type": "string", "description": "Locally generated UUID. Never leaves the device." },
+    "sessionId": { "type": "string", "description": "Local session reference (may be empty pre-session)." },
+    "policyVersion": { "type": "string", "description": "Ranking policy that produced this decision (e.g. heuristic-v1).", "const": "heuristic-v1" },
+    "analysisVersion": { "type": "string", "description": "Task-analysis rules version (e.g. analysis-v2)." },
+    "taskHash": {
+      "type": "string",
+      "description": "FNV-1a hash of the normalized task title. Raw text is intentionally NOT stored."
+    },
+    "analysis": {
+      "type": "object",
+      "description": "Reduced analysis snapshot — numeric signals only, no free text.",
+      "properties": {
+        "structure": { "type": "string" },
+        "medium": { "enum": ["digital", "physical", "mixed", "unknown"] },
+        "complexity": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "ambiguity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "effort": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "actionCount": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "dependencies": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "scopeStrength": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "emotionalFriction": { "type": "number", "minimum": 0, "maximum": 1 },
+        "locale": { "type": "string" }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "description": "Scored candidate set (top 10). Action text retained in-memory only for the buffer's lifetime.",
+      "items": {
+        "type": "object",
+        "required": ["action", "strategy", "size", "score", "valid", "source"],
+        "properties": {
+          "action": { "type": "string" },
+          "strategy": { "type": "string" },
+          "size": { "type": "integer", "minimum": 0, "maximum": 4 },
+          "score": { "type": "number" },
+          "valid": { "type": "boolean" },
+          "source": { "enum": ["template", "decompose", "fallback", "remote"] }
+        }
+      }
+    },
+    "chosenAction": { "type": "string" },
+    "chosenStrategy": { "type": "string" },
+    "chosenLevel": { "type": "integer", "minimum": 0, "maximum": 4 },
+    "selectionProbability": {
+      "type": "number",
+      "const": 1,
+      "description": "The engine is deterministic: the top valid candidate is always selected. Never faked."
+    },
+    "shownAt": { "type": "integer", "description": "ms epoch when the action was presented." },
+    "startedAt": { "type": ["integer", "null"], "description": "ms epoch when the user began, if known." },
+    "feedback": { "enum": ["worked", "tooBig", "stuck", "irrelevant", null] },
+    "outcome": { "enum": ["kept", "stopped", "stuck", null] },
+    "validationFailures": { "type": "integer", "minimum": 0, "description": "Count of candidates rejected by the validator in this decision." },
+    "reward": {
+      "type": ["object", "null"],
+      "description": "Evaluation baseline (§29) — components kept separate; never used for online updates while adaptive policy is disabled.",
+      "properties": {
+        "startedQuickly": { "type": "number", "minimum": 0, "maximum": 1 },
+        "worked": { "type": "number", "minimum": 0, "maximum": 1 },
+        "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "kept": { "type": "number", "minimum": 0, "maximum": 1 },
+        "penalties": {
+          "type": "array",
+          "items": {
+            "enum": ["irrelevance", "semantic-duplication", "medium-mismatch", "fabricated-context", "invalid-level", "poor-fidelity", "judgmental", "excessive-actions"]
+          }
+        }
+      }
+    }
+  },
+  "privacy": {
+    "rawTaskText": "not stored (hashed)",
+    "retention": "in-memory ring buffer, 64 entries, cleared on reload",
+    "transmission": "none by default; remote AI endpoint only if explicitly configured by the user"
+  }
+}

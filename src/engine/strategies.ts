@@ -106,12 +106,15 @@ export const STRATEGIES: StrategyDef[] = [
     sizes: [0, 3],
     base: { progress: 0.45, effort: 0.35, initiation: 0.2, cognitive: 0.1, emotional: 0.15 },
     templates: [
-      /* bodily approaches — require a real location or a physical task */
-      { fits: locationOk, render: (s) => `Stand up and walk to ${s.p}. Nothing else.` },
-      { fits: locationOk, render: (s) => `Clear a hand-sized space at ${s.p} — that's the whole move.` },
-      { fits: locationOk, render: (s) => `Sit down at ${s.p} and face ${s.o}.` },
+      /* bodily approaches — ONLY with a real named location (explicit context) */
+      { fits: hasPlace, render: (s) => `Stand up and walk to ${s.p}. Nothing else.` },
+      { fits: hasPlace, render: (s) => `Clear a hand-sized space at ${s.p} — that's the whole move.` },
+      { fits: hasPlace, render: (s) => `Sit down at ${s.p} and face ${s.o}.` },
+      /* physical task without a named place — body meets the OBJECT, never a fabricated spot */
+      { fits: (a) => isPhysical(a) && !hasPlace(a), render: (s) => `Pick up one thing that belongs to ${s.o}. Just hold it.` },
+      { fits: (a) => isPhysical(a) && !hasPlace(a), render: () => `Clear one hand-sized space right in front of you.` },
       /* bodily approaches for screen work — body + named digital artifact */
-      { fits: isDigital, render: (s) => `Sit down, open ${s.t}, and put your hands where the typing happens.` },
+      { fits: isDigital, render: (s) => `Sit down, open ${s.t}, and put your hands on the keyboard.` },
       { fits: isDigital, render: (s) => `Close every tab except ${s.t}. Then just look at it.` },
       { fits: isDigital, render: (s) => `Put your phone in another room, then open ${s.t}.` },
       /* no evidence either way — anchored to the task, fabricate nothing */
@@ -379,7 +382,8 @@ export function decompose(a: TaskAnalysis, size: Level): string {
       ? `Pick up the first thing you see at ${p}. Just hold it.`
       : `Pick up the first thing in front of you. Just hold it.`,
     3: `Touch one thing involved in ${o}. That's the whole step.`,
-    4: p ? `Walk to ${p}. Standing there is the whole step.` : `Stand up and face ${o}. Standing there is the whole step.`,
+    /* floor: go to a REAL place, or make contact with one real object — never "face the whole thing" */
+    4: p ? `Walk to ${p}. Arriving is the whole step.` : `Rest one hand on something you'll ${a.verb ?? "work on"}. 10 seconds only.`,
   };
   const mixed: Record<Level, string> = {
     0: scopeRung(a),

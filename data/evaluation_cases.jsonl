@@ -1,0 +1,23 @@
+{"id":"digital-comm","task":"Reply to John's email","expect":{"medium":"digital","structure":"communication","rejectContains":["glass of water","stand up","where John's email happens","clear a hand","touch the email"],"entityPreserved":"John's"}}
+{"id":"digital-code","task":"fix this weird error in my codebase","expect":{"medium":"digital","structure":"fixing","rejectContains":["stand up and walk","clear a hand-sized space","where it happens"]}}
+{"id":"digital-writing","task":"write a complete blog article","expect":{"medium":"digital","structure":"writing","complexityMin":1,"rejectContains":["walk to","glass of water"]}}
+{"id":"physical-cleaning","task":"clean my room","expect":{"medium":"physical","structure":"cleaning","rejectContains":["open the app or file","cursor","close every tab"]}}
+{"id":"physical-organizing","task":"organize the kitchen drawers","expect":{"medium":"physical","structure":"organizing","rejectContains":["open the app or file","which app"]}}
+{"id":"mixed-compound","task":"declutter the garage and sell old stuff online","expect":{"medium":"mixed","actionCountMin":1,"rejectContains":["where it happens"]}}
+{"id":"unknown-vague","task":"deal with that thing somehow","expect":{"medium":"unknown","ambiguityMin":0.4,"rejectContains":["spot where it happens","where it happens"]}}
+{"id":"large-scope","task":"clean my entire apartment","expect":{"scopeStrengthMin":2,"complexityMin":2,"mustStayAbout":["clean","clear","pick","tidy","surface","item","object","one"],"rejectContains":["glass of water","open your laptop","open your email"]}}
+{"id":"large-scope-inbox","task":"get through my whole inbox backlog","expect":{"scopeStrengthMin":2,"rejectContains":["stand up and take one step"]}}
+{"id":"negative-irrelevant","task":"Reply to John's email","evaluation":"candidate-pool","rejectEverywhere":["get a glass of water","stare at","do something","take action","be more disciplined"]}
+{"id":"arabic-cleaning","task":"نظف الشقة كلها","expect":{"locale":"ar","structure":"cleaning","medium":"physical","scopeStrengthMin":2}}
+{"id":"arabic-digital","task":"رد على رسالة أحمد","expect":{"locale":"ar","structure":"communication","medium":"digital","entityPreserved":"أحمد","rejectContains":["stand up","walk to"]}}
+{"id":"named-person","task":"email Sarah about the invoice","expect":{"person":"sarah","medium":"digital","entityPreserved":"Sarah"}}
+{"id":"named-tool","task":"update the budget in excel","expect":{"tool":"excel","medium":"digital","rejectContains":["stand up and walk"]}}
+{"id":"named-location","task":"tidy the garage","expect":{"place":"garage","medium":"physical"}}
+{"id":"apostrophe-entity","task":"finish Maria's report","expect":{"entityPreserved":"Maria's","rejectContains":["marias"]}}
+{"id":"unicode-accent","task":"reply to José's message","expect":{"entityPreserved":"José","medium":"digital"}}
+{"id":"semantic-duplicates","evaluation":"dedupe","group":["Open John's email.","Open the email from John.","Click John's email."],"expectSameIntent":true}
+{"id":"pool-exhaustion","evaluation":"exhaustion","task":"water the plants","iterations":12,"expectNoRepeat":true}
+{"id":"recovery-fields","evaluation":"recovery","task":"do my taxes","why":"stuck","requireFields":["override","level","strategy","memory","note","decision","feedbacks","lastFeedback"]}
+{"id":"hysteresis","evaluation":"hysteresis","task":"clean my entire apartment","expect":{"oneWinHolds":true,"twoWinsShrink":true,"failureShrinksNow":true}}
+{"id":"remote-invalid","evaluation":"remote","task":"Reply to John's email","ladder":["Get a glass of water.","Stand up and take one step toward where the email happens.","Open your laptop and stretch.","Open the email from John.","Open the email from John."],"expectKept":1}
+{"id":"undefined-level-regression","evaluation":"levels","tasks":["Reply to John's email","clean my entire apartment","write a complete blog article","deal with that thing somehow","نظف الشقة كلها"],"expectAllLevelsIn": [0,4]}

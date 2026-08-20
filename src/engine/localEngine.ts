@@ -58,11 +58,12 @@ export {
   strategyFitsTask,
 } from "./strategies";
 
-import { analyzeTask, clampLevel, intentKey } from "./analysis";
+import { analyzeTask, clampLevel, intentKey, tokenize } from "./analysis";
 import { adaptFromFeedback as adaptLocal, barrierIntervention, buildRecoveryStrategy, planFirstStep } from "./engine";
 import { emptyMemory, nextStep, passesGuardrails, previewSteps, sizeFor } from "./selector";
 import type { Barrier, Draft, Level, Outcome, Profile, SessionRecord, StrategyId, TaskAnalysis } from "./types";
-import { computeProfile } from "./profile";
+import { getDecisionLog } from "./decisionLog";
+import { computeProfile, emptyProfile } from "./profile";
 
 /** The nine named blockers offered in the state check. */
 export const BLOCKERS: Array<{ v: Barrier; label: string; icon: string; hint: string }> = [
@@ -441,6 +442,143 @@ export function runEngineTests(): TestResults {
       return JSON.stringify({ plan: { action: plan.action, strategy: plan.strategy, size: plan.size }, ladder });
     };
     ok(run() === run(), "determinism/same-input-same-output", "outputs differed");
+  }
+
+  /* ---------- T-D · scope reduction must PRESERVE the task (TEST D) ---------- */
+  {
+    const t = "clean my entire apartment";
+    const a = analyzeTask(t);
+    ok(a.scopeStrength >= 2, "scope/strength-detected", String(a.scopeStrength));
+    ok(a.complexity >= 2, "scope/complexity-bumped", String(a.complexity));
+    /* dynamic fidelity anchor: the task's OWN object/verb tokens + scope words */
+    const ownTokens = [
+      ...tokenize(a.object).filter((w) => w.length > 2),
+      ...(a.verb ? [a.verb] : []),
+      "clean", "clear", "pick", "tidy", "touch", "surface", "item", "object", "one", "hand", "hold",
+    ];
+    const ANCHOR = new RegExp(ownTokens.join("|"), "i");
+    const d = freshDraft(t);
+    const ladder = previewSteps({ ...d, level: 0 }, null, 5);
+    for (const r of ladder) {
+      ok(ANCHOR.test(r.action), "scope/still-about-cleaning", r.action);
+      emit(r.action, r.size);
+    }
+    const plan = planFirstStep(a, {});
+    ok(ANCHOR.test(plan.action), "scope/plan-about-cleaning", plan.action);
+  }
+
+  /* ---------- T-E · entity preservation (TEST E + §8/§24) ---------- */
+  {
+    const a = analyzeTask("Reply to John's email");
+    ok(/John's/i.test(a.object), "entity/apostrophe-kept", a.object);
+    ok(!/johns/i.test(a.object), "entity/no-destructive-fold", a.object);
+
+    const u = analyzeTask("Reply to José's email");
+    ok(/José/i.test(u.object), "entity/accented-kept", u.object);
+
+    const ar = analyzeTask("رد على رسالة أحمد");
+    ok(ar.object.includes("أحمد"), "entity/arabic-kept", ar.object);
+  }
+
+  /* ---------- T-F · multi-level semantic dedupe (TEST F) ---------- */
+  {
+    const k1 = intentKey("Open John's email.");
+    const k2 = intentKey("Open the email from John.");
+    const k3 = intentKey("Click John's email.");
+    ok(k1 === k2 && k2 === k3, "dedupe/synonym-variants", `${k1} | ${k2} | ${k3}`);
+    ok(intentKey("Write one sentence of the reply.") !== k1, "dedupe/distinct-intent-stays-distinct", "collision!");
+  }
+
+  /* ---------- T-I · meaningful progress: forbidden filler (TEST I) ---------- */
+  {
+    const NO_PROGRESS = [
+      "get a glass of water", "stare at", "sit near", "stand up and face the",
+      "do something", "take action", "be more disciplined", "stop procrastinating",
+    ];
+    ok(
+      allActions.every((s) => !NO_PROGRESS.some((b) => s.toLowerCase().includes(b))),
+      "progress/no-filler-anywhere",
+      allActions.find((s) => NO_PROGRESS.some((b) => s.toLowerCase().includes(b))) ?? "",
+    );
+  }
+
+  /* ---------- T-J · remote candidates get zero trust (TEST J + §12) ---------- */
+  {
+    const t = "Reply to John's email";
+    const poisoned = [
+      "Get a glass of water.",                                       // filler
+      "Stand up and take one step toward where the email happens.", // fabricated location
+      "Open your laptop and stretch.",                              // off-task
+      "Open the email from John.",                                  // valid — must survive
+      "Open the email from John.",                                  // duplicate — must be dropped
+    ];
+    const d = freshDraft(t);
+    const ladder = previewSteps({ ...d, ladderOverride: poisoned }, null, 5);
+    ok(ladder.length === 1, "remote/filters-invalid", ladder.map((r) => r.action).join(" || "));
+    ok(ladder[0] && intentKey(ladder[0].action) === intentKey("Open the email from John."), "remote/keeps-valid", ladder[0]?.action ?? "∅");
+    ladder.forEach((r) => emit(r.action, r.size));
+  }
+
+  /* ---------- T-K · recovery preserves every Draft-facing field (§21) ---------- */
+  {
+    const d = freshDraft("do my taxes");
+    const p = planFirstStep(d.analysis, {});
+    const seeded: Draft = { ...d, level: p.size, override: p.action, strategy: p.strategy, memory: p.memory, feedbacks: 2, lastFeedback: "worked" };
+    const rec = buildRecoveryStrategy(seeded, null, "stuck");
+    const checks: Array<[string, boolean]> = [
+      ["override", typeof rec.override === "string" && rec.override.length > 0],
+      ["level", validLevel(rec.level)],
+      ["strategy", rec.strategy != null],
+      ["memory", rec.memory != null && Array.isArray(rec.memory.shown)],
+      ["note", typeof rec.note === "string"],
+      ["decision", rec.decision != null && typeof rec.decision.reason === "string"],
+      ["feedbacks", rec.feedbacks === 3],
+      ["lastFeedback", rec.lastFeedback === "stuck"],
+    ];
+    for (const [field, good] of checks) ok(good, `recovery/preserves-${field}`, String(rec[field as keyof typeof rec]));
+  }
+
+  /* ---------- T-L · Arabic end-to-end (§24) ---------- */
+  {
+    const ar1 = analyzeTask("نظف الشقة كلها");
+    ok(ar1.locale === "ar", "arabic/locale", ar1.locale);
+    ok(ar1.structure === "cleaning", "arabic/structure", ar1.structure);
+    ok(ar1.medium === "physical", "arabic/medium", ar1.medium);
+    ok(ar1.scopeStrength >= 2, "arabic/scope", String(ar1.scopeStrength));
+    const plan = planFirstStep(ar1, {});
+    ok(validLevel(plan.size) && plan.action.trim().length > 0, "arabic/plan", plan.action);
+    const ladder = previewSteps({ ...freshDraft("نظف الشقة كلها"), level: plan.size }, null, 4);
+    const intents = ladder.map((r) => intentKey(r.action));
+    ok(new Set(intents).size === ladder.length, "arabic/ladder-distinct", ladder.map((r) => r.action).join(" || "));
+    ladder.forEach((r) => emit(r.action, r.size));
+
+    const ar2 = analyzeTask("رد على رسالة أحمد");
+    ok(ar2.structure === "communication", "arabic/communication", ar2.structure);
+    ok(ar2.medium === "digital", "arabic/digital", ar2.medium);
+    const p2 = planFirstStep(ar2, {});
+    ok(leaks(p2.action, BANNED_FOR_DIGITAL).length === 0, "arabic/no-physical-leak", p2.action);
+    emit(p2.action, p2.size);
+  }
+
+  /* ---------- T-M · analysis contract fields (§9) ---------- */
+  {
+    const a = analyzeTask("Build my website");
+    ok(typeof a.scopeStrength === "number" && a.scopeStrength >= 0 && a.scopeStrength <= 3, "contract/scopeStrength", String(a.scopeStrength));
+    const c = a.analysisConfidence;
+    const inRange = [c.structure, c.medium, c.verb, c.object, c.barrier].every((v) => v >= 0 && v <= 1);
+    ok(inRange, "contract/confidence-range", JSON.stringify(c));
+    ok(typeof a.locale === "string" && a.locale.length > 0, "contract/locale", a.locale);
+    ok(typeof a.analysisVersion === "string" && a.analysisVersion.length > 0, "contract/analysisVersion", a.analysisVersion);
+    const plan = planFirstStep(a, {});
+    const log = getDecisionLog();
+    ok(log.length > 0 && log[log.length - 1].policyVersion.length > 0, "contract/policyVersion-traced", String(log.length));
+  }
+
+  /* ---------- T-N · learning can be fully disabled (§32.18) ---------- */
+  {
+    const sessions = Array.from({ length: 8 }, (_, i) => session(i, 3, i < 6 ? "kept" : "stopped"));
+    const off = emptyProfile(sessions.length);
+    ok(off.bestSize === null && off.bestStrategy === null && off.confidence === "none", "learning/disabled-is-empty", JSON.stringify(off.bestSize));
   }
 
   /* ---------- global invariants over everything emitted above ---------- */

@@ -752,7 +752,7 @@ export function previewSteps(draft: Draft, profile: Profile | null, count = 4): 
       for (const cand of pool) {
         for (let bump = 0; bump < 8 && !placed; bump++) {
           const action = renderStrategy(cand.id, draft.analysis, salt + bump * 7);
-          if (action && take(action)) {
+          if (action && take(action, cand.id, size, "template")) {
             usedStrategies.add(cand.id);
             out.push({ action, strategy: cand.id, size });
             placed = true;
@@ -773,7 +773,7 @@ export function previewSteps(draft: Draft, profile: Profile | null, count = 4): 
 
     if (!placed) {
       const fb = freshFallback({ analysis: draft.analysis, barrier: draft.blocker, size, memory: draft.memory, profile, salt: salt + i });
-      if (take(fb)) out.push({ action: fb, strategy: "timebox", size });
+      if (take(fb, "timebox", size, "fallback")) out.push({ action: fb, strategy: "timebox", size });
     }
   }
   return out;
