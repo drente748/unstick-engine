@@ -114,7 +114,67 @@ export interface AnalysisConfidence {
 }
 
 /** Bump when analysis rules change meaningfully (recorded in traces). */
-export const ANALYSIS_VERSION = "3.0.0";
+export const ANALYSIS_VERSION = "4.0.0-parse";
+
+/* ---------------- semantic parse layer (analysis v4) ---------------- */
+
+/** A single extracted value plus how strongly / explicitly it was evidenced. */
+export interface SlotEvidence {
+  value: string;
+  /** 0..1 — how confident the parse is about this value. */
+  strength: number;
+  /** Stated in the text (true) vs inferred from structure (false). */
+  explicit: boolean;
+}
+
+/**
+ * The structured semantic parse of a task. This is the "new-generation"
+ * core: instead of matching keyword bags, the analysis produces typed
+ * slots with evidence, and every downstream estimate (structure, effort,
+ * ambiguity, medium) is derived FROM these slots. Fully deterministic.
+ */
+export interface ParsedIntent {
+  raw: string;
+  /** Normalized display title. */
+  title: string;
+  locale: string;
+  action: {
+    verb: string | null;
+    phrase: string | null;
+    /** Where the verb sits — earlier verbs are stronger initiation cues. */
+    position: "initial" | "mid" | "late" | "none";
+    strength: number;
+  };
+  target: { object: string; strength: number };
+  /** Who the task is directed at ("reply to JOHN…"). */
+  recipient: string | null;
+  /** What the task is about ("…about THE INVOICE"). */
+  topic: string | null;
+  place: SlotEvidence | null;
+  tool: SlotEvidence | null;
+  deadline: { value: string | null; soon: boolean };
+  scope: { word: string | null; strength: number };
+  /** "don't X", "stop X", "quit X" — the task is framed as avoidance. */
+  negated: boolean;
+  /** before/after/once/when/so-that — prerequisite structure. */
+  conditionals: number;
+  /** and / , / ; / + — multi-part structure. */
+  conjunctions: number;
+  length: number;
+  vague: boolean;
+  /** Distinct evidence kinds found — drives confidence. */
+  evidenceKinds: string[];
+}
+
+/** A scored structure hypothesis with margin-based confidence + evidence. */
+export interface StructureScore {
+  structure: Structure;
+  score: number;
+  /** 0..1 — margin over the runner-up, blended with evidence diversity. */
+  confidence: number;
+  /** Human-readable evidence strings (internal, explainable). */
+  evidence: string[];
+}
 /** Bump when the ranking/scoring policy changes (recorded in traces). */
 export const POLICY_VERSION = "heur-1.0.0";
 
@@ -163,6 +223,18 @@ export interface TaskAnalysis {
   scopeWord: string | null;
   /** 0..3 — how broad the scope is (0 bounded … 3 whole-domain). */
   scopeStrength: number;
+  /** Who the task is directed at ("reply to John…"), if stated. */
+  recipient: string | null;
+  /** What it's about ("…about the invoice"), if stated. */
+  topic: string | null;
+  /** A near deadline raises initiation friction without fabricating dates. */
+  deadlineSoon: boolean;
+  /** Framed as avoidance ("don't…", "stop…", "quit…"). */
+  negated: boolean;
+  /** Prerequisite markers (before/after/once/when…). */
+  conditionals: number;
+  /** Evidence backing the chosen structure (explainability). */
+  structureEvidence: string[];
   /** Per-inference confidence values (0..1). */
   analysisConfidence: AnalysisConfidence;
   /** Detected script/locale hint ("en", "ar", …). */
