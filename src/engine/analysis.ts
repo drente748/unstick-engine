@@ -1,13 +1,38 @@
 import { ANALYSIS_VERSION } from "./types";
-import type { Barrier, BarrierKind, Capacity, Level, Medium, Structure, TaskAnalysis } from "./types";
+import type {
+  Barrier,
+  BarrierKind,
+  Capacity,
+  Level,
+  Medium,
+  ParsedIntent,
+  SlotEvidence,
+  Structure,
+  StructureScore,
+  TaskAnalysis,
+} from "./types";
 
 /* ============================================================
-   Stages 1–5 of the pipeline: normalize → classify →
-   complexity → friction → barrier hypothesis → capacity.
-   Pure, deterministic task understanding. The goal is not to
-   label the task "correctly" but to extract every signal that
-   changes what a good FIRST move looks like.
+   Stages 1–5 of the pipeline — next-generation task understanding.
+
+   Architecture:
+     normalize → tokenize → SEMANTIC PARSE (typed slots + evidence)
+     → WEIGHTED FEATURE CLASSIFIER (structure + margin confidence)
+     → medium inference → complexity/friction → barrier hypothesis
+     → capacity.
+
+   The parse layer extracts WHAT / WHO / ABOUT-WHAT / WHERE /
+   WITH-WHAT / HOW-BIG / HOW-URGENT from the user's own words, in
+   English AND Arabic, always preserving the original text for
+   display. Every downstream estimate is derived FROM these slots.
+   Unknown context stays null — never fabricated.
+
+   Pure, deterministic, local. The goal is not to label the task
+   "correctly" but to extract every signal that changes what a
+   good FIRST move looks like.
    ============================================================ */
+
+/* ---------------- lexicons ---------------- */
 
 const VERBS: Record<string, string> = {
   write: "writing", reply: "a reply", email: "an email", text: "a text", call: "a call",
@@ -36,6 +61,9 @@ const STOPWORDS = new Set([
   "that", "this", "it", "its", "is", "are", "be", "do", "does", "need", "have", "has", "will",
   "should", "can", "must", "really", "finally", "just", "also", "again", "today", "now", "soon",
   "asap", "please", "i", "we", "you", "he", "she", "they", "there", "here", "all", "everything",
+  /* Arabic function words — dropped for matching, never for display */
+  "على", "إلى", "الى", "من", "في", "عن", "مع", "أن", "ان", "هذا", "هذه", "ذلك", "تلك",
+  "التي", "الذي", "يا", "ثم", "أو", "قد", "لقد",
 ]);
 
 const PLACES = [
@@ -51,6 +79,7 @@ const TOOLS = [
   "spreadsheet", "slides", "canvas", "figma", "vscode", "editor", "terminal", "calendar",
   "portal", "account", "dashboard", "notebook", "textbook", "notes", "camera", "guitar",
   "piano", "sketchbook", "repo", "codebase", "printer", "sewing machine", "banking",
+  "تطبيق", "ايميل", "إيميل", "بريد", "واتساب",
 ];
 
 const PEOPLE = [
@@ -60,44 +89,39 @@ const PEOPLE = [
   "brother", "partner", "wife", "husband", "kids", "customer", "customers", "advisor",
 ];
 
-const STRUCTURE_RULES: Array<[Structure, string[]]> = [
-  ["cleaning", ["clean", "tidy", "declutter", "laundry", "wash", "dishes", "mess", "vacuum", "scrub", "sweep", "mop", "dust", "trash"]],
-  ["writing", ["write", "writing", "essay", "article", "blog", "post", "draft", "paper", "report", "thesis", "dissertation", "letter", "caption", "novel", "story", "script", "copy", "summary"]],
-  ["communication", ["reply", "replies", "email", "emails", "inbox", "message", "messages", "call", "phone", "text", "slack", "dm", "contact", "reach out", "respond", "follow up", "followup", "meeting"]],
-  ["research", ["research", "compare", "look into", "find out", "investigate", "analyze", "analyse", "read up", "survey", "options", "which", "best "]],
-  ["deciding", ["decide", "decision", "choose", "choice", "whether", "pick", "select", "commit", "cancel or", "quit"]],
-  ["learning", ["study", "revise", "revision", "exam", "test", "homework", "course", "lecture", "learn", "flashcards", "textbook", "chapter", "practice "]],
-  ["creating", ["draw", "paint", "design", "sketch", "compose", "song", "music", "video", "photo", "film", "edit a", "create", "make a", "build a", "craft", "sew", "knit", "bake"]],
-  ["errand", ["buy", "groceries", "grocery", "pick up", "drop off", "post", "mail", "return", "renew", "book", "appointment", "schedule", "reserve", "bank", "pharmacy", "store", "shop for", "order"]],
-  ["fixing", ["fix", "repair", "broken", "bug", "error", "leak", "crack", "debug", "troubleshoot", "mend", "not working"]],
-  ["organizing", ["organize", "organise", "sort", "file", "arrange", "catalog", "inventory", "paperwork", "folders", "documents", "archive"]],
-  ["prep", ["prepare", "prep", "pack", "set up", "setup", "ready", "before", "plan for", "get ready"]],
-  /* Arabic structure signals */
-  ["cleaning", ["نظف", "تنظيف", "رتب", "ترتيب", "غسيل", "أطباق", "صحون"]],
-  ["writing", ["اكتب", "كتابة", "مقال", "مقالة", "مدونة", "تقرير", "بحث "]],
-  ["communication", ["رد على", "رسالة", "رسائل", "بريد", "ايميل", "إيميل", "واتساب"]],
-  ["learning", ["ذاكر", "مذاكرة", "مراجعة", "امتحان", "اختبار", "درس"]],
-  ["errand", ["اشتر", "سوق", "بقالة", "موعد"]],
-  ["fixing", ["صلح", "تصليح", "عطل", "مكسور"]],
-  ["organizing", ["نظم", "تنظيم", "ملفات", "أوراق"]],
-];
+const PROJECT_WORDS = ["project", "website", "web site", "app", "business", "startup", "portfolio", "thesis", "renovation", "launch", "campaign", "channel", "مشروع", "موقع"];
 
-const PROJECT_WORDS = ["project", "website", "web site", "app", "business", "startup", "portfolio", "thesis", "renovation", "move ", "launch", "campaign", "channel"];
-
-const VAGUE_WORDS = ["stuff", "things", "thing", "everything", "my life", "somehow", "somewhere", "whatever", "it all", "حاجة", "شيء ما"];
-const BIG_WORDS = ["entire", "whole", "all ", "every", "complete", "completely", "everything", "whole house", "from scratch", "all of", "apartment", "house", "backlog", "inbox", "كل", "الشقة كلها", "البيت كله"];
-const DEADLINE_WORDS = ["today", "tonight", "tomorrow", "deadline", "due", "asap", "urgent", "this week", "friday", "monday", "sunday", "morning", "evening"];
+const VAGUE_WORDS = ["stuff", "things", "thing", "everything", "my life", "somehow", "somewhere", "whatever", "it all", "حاجة", "شيء ما", "الحاجة"];
+const DEADLINE_WORDS = ["today", "tonight", "tomorrow", "deadline", "due", "asap", "urgent", "this week", "friday", "monday", "sunday", "morning", "evening", "اليوم", "غدا", "غدًا"];
+const URGENT_WORDS = ["today", "tonight", "asap", "urgent", "due", "اليوم", "الآن"];
 /** Strong scope words — these MUST materially raise complexity/scope. */
-const STRONG_SCOPE_WORDS = [
+export const STRONG_SCOPE_WORDS = [
   "entire", "whole", "all of", "everything", "from scratch", "complete", "completely",
   "whole house", "apartment", "house", "backlog", "inbox",
   "كل", "كلها", "الشقة كلها", "البيت كله", "جميع",
 ];
-const PHYSICAL_WORDS = ["clean", "tidy", "walk", "run", "gym", "laundry", "dishes", "pack", "move", "cook", "stretch", "exercise", "vacuum", "garden", "paint", "repair", "fix", "groceries", "store"];
+const SCOPE_WORDS = ["entire", "whole", "all", "every", "complete", "everything", "apartment", "house", "backlog", "inbox", "كل", "جميع"];
+const PHYSICAL_WORDS = ["clean", "tidy", "walk", "run", "gym", "laundry", "dishes", "pack", "move", "cook", "stretch", "exercise", "vacuum", "garden", "paint", "repair", "fix", "groceries", "store", "نظف", "رتب"];
 const DIGITAL_WORDS = ["email", "inbox", "doc", "document", "file", "website", "site", "app", "form", "code", "codebase", "repo", "spreadsheet", "excel", "notion", "slides", "portal", "account", "blog", "article", "text", "message", "slack", "online", "رسالة", "رسائل", "بريد", "ايميل", "إيميل", "موقع", "تطبيق", "واتساب", "مدونة"];
 const APP_WORDS = ["email", "inbox", "doc", "document", "file", "website", "site", "app", "form", "code", "codebase", "repo", "spreadsheet", "excel", "notion", "slides", "portal", "account", "calendar", "banking", "browser", "editor", "vscode", "تطبيق", "ايميل", "إيميل", "بريد"];
-const STAKE_WORDS = ["exam", "test", "interview", "boss", "client", "taxes", "tax", "deadline", "due", "urgent", "important", "presentation", "thesis", "visa", "contract", "rent"];
+const STAKE_WORDS = ["exam", "test", "interview", "boss", "client", "taxes", "tax", "deadline", "due", "urgent", "important", "presentation", "thesis", "visa", "contract", "rent", "امتحان", "مهم"];
 const FIRSTSTEP_WORDS = ["open", "call", "email", "text", "walk", "stand", "sit", "grab", "put on", "pick up", "find", "check"];
+
+/* Communication verbs — the heart of recipient/topic parsing. */
+const COMM_VERBS = new Set([
+  "reply", "respond", "answer", "email", "text", "message", "call", "contact", "send", "write",
+  "ring", "dm", "whatsapp", "ping", "رد", "اتصل", "راسل", "ابعت", "أرسل",
+]);
+const MESSAGE_NOUNS = new Set([
+  "email", "message", "letter", "text", "dm", "note", "mail", "رسالة", "بريد", "ايميل", "إيميل", "واتساب",
+]);
+const TOPIC_MARKERS = ["about", "regarding", "concerning", "re:", "عن", "بخصوص", "حول"];
+const CONDITIONAL_WORDS = ["before", "after", "once", "when", "until", "wait", "waiting", "قبل", "بعد", "لما", "عندما", "حتى"];
+const NEGATION_STARTS = ["don't", "dont", "do not", "never", "stop", "quit", "avoid", "no more", "لا", "توقف", "تجنب", "كف عن"];
+const SCREEN_VERBS = new Set(["email", "reply", "respond", "text", "message", "code", "debug", "send", "dm", "رد", "راسل"]);
+const BODY_VERBS = new Set(["clean", "tidy", "declutter", "pack", "cook", "repair", "walk", "run", "stretch", "exercise", "paint", "wash", "نظف", "رتب", "صلح"]);
+
+/* ---------------- stage 1: normalize + tokenize ---------------- */
 
 /** Stage 1 — normalize: trim, cap, de-quote, collapse whitespace. */
 export function normalizeTask(raw: string): string {
@@ -118,6 +142,8 @@ export const tokenize = (s: string): string[] =>
     .split(/\s+/)
     .filter(Boolean);
 
+const stem = (t: string): string => t.replace(/(ing|ed|es|s)$/, "");
+
 function findFirst(words: string[], list: string[]): string | null {
   const joined = words.join(" ");
   for (const item of list) {
@@ -126,50 +152,280 @@ function findFirst(words: string[], list: string[]): string | null {
   return null;
 }
 
-/** Stage 2 — classify the task structure from its own words (with evidence score). */
-export function classifyTaskScored(words: string[], title: string): { structure: Structure; score: number } {
-  const joined = words.join(" ");
-  let best: Structure = "generic";
-  let bestScore = 0;
-  for (const [structure, keys] of STRUCTURE_RULES) {
+/* ---------------- stage 2: semantic parse ---------------- */
+
+interface Chunk {
+  /** ORIGINAL text — used for everything the user may see. */
+  text: string;
+  /** Normalized tokens — used for matching only. */
+  toks: string[];
+  /** Does any token carry real content? */
+  content: boolean;
+}
+
+const chunkOf = (title: string): Chunk[] =>
+  title
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((text) => {
+      const toks = tokenize(text);
+      return { text, toks, content: toks.some((t) => !STOPWORDS.has(t)) };
+    });
+
+function findVerb(chunks: Chunk[]): { base: string; phrase: string; index: number } | null {
+  for (let i = 0; i < chunks.length; i++) {
+    for (const t of chunks[i].toks) {
+      const base = VERBS[t] ? t : VERBS[stem(t)] ? stem(t) : null;
+      if (base) return { base, phrase: VERBS[base], index: i };
+    }
+  }
+  return null;
+}
+
+/**
+ * WHO is this directed at? Parses "reply to John's email",
+ * "email Sarah about the invoice", "رد على رسالة أحمد" — always
+ * returning the ORIGINAL casing/script. Stops before artifacts
+ * ("John's EMAIL" → recipient is John) and before topic markers.
+ */
+function findRecipient(chunks: Chunk[], verb: { base: string; index: number } | null): string | null {
+  if (!verb || !COMM_VERBS.has(verb.base)) return null;
+  const parts: string[] = [];
+  for (let i = verb.index + 1; i < chunks.length && parts.length < 2; i++) {
+    const c = chunks[i];
+    const lead = c.toks[0];
+    if (!lead) continue;
+    if (TOPIC_MARKERS.includes(lead)) break;
+    if (["to", "back", "on", "على", "إلى", "الى"].includes(lead)) continue;
+    if (MESSAGE_NOUNS.has(lead) || TOOLS.includes(lead)) continue;
+    if (!c.content) continue;
+    parts.push(c.text);
+  }
+  if (parts.length === 0) return null;
+  /* "John's" → "John" (the possessive marker belongs to the artifact) */
+  const last = parts.length - 1;
+  parts[last] = parts[last].replace(/['’]s$/i, "");
+  return parts.join(" ");
+}
+
+/** WHAT is it about? "…about the invoice", "…عن الفاتورة". */
+function findTopic(chunks: Chunk[]): string | null {
+  for (let i = 0; i < chunks.length; i++) {
+    const lead = chunks[i].toks[0];
+    if (!lead || !TOPIC_MARKERS.includes(lead)) continue;
+    const parts: string[] = [];
+    for (let j = i + 1; j < chunks.length && parts.length < 4; j++) {
+      if (!chunks[j].content) continue;
+      parts.push(chunks[j].text);
+    }
+    if (parts.length) return parts.join(" ");
+  }
+  return null;
+}
+
+function findSlot(chunks: Chunk[], list: string[], how: string): SlotEvidence | null {
+  const joined = chunks.map((c) => c.toks.join(" ")).join(" ");
+  for (const item of list) {
+    if (joined.includes(item)) return { value: item.trim(), strength: 0.9, explicit: true, how } as SlotEvidence & { how: string };
+  }
+  return null;
+}
+
+/**
+ * The semantic parse — every slot is evidence-backed and preserves
+ * the user's original text. Unknown context stays UNKNOWN: nothing
+ * here fabricates people, places or artifacts.
+ */
+export function parseTask(rawTitle: string): ParsedIntent {
+  const title = normalizeTask(rawTitle);
+  const chunks = chunkOf(title);
+  const toks = chunks.flatMap((c) => c.toks);
+  const lower = title.toLowerCase();
+  const locale = /[\u0600-\u06FF]/.test(title) ? "ar" : "en";
+
+  const v = findVerb(chunks);
+  const recipient = findRecipient(chunks, v);
+  const topic = findTopic(chunks);
+  const place = findSlot(chunks, PLACES, "lexicon:place");
+  const tool = findSlot(chunks, TOOLS, "lexicon:tool");
+
+  const scopeWord = SCOPE_WORDS.find((b) => lower.includes(b)) ?? null;
+  const scopeStrong = scopeWord ? STRONG_SCOPE_WORDS.some((s) => lower.includes(s)) : false;
+
+  const conjunctions = (lower.match(/\band\b|,|;|؛| و /g) ?? []).length;
+  const negated = NEGATION_STARTS.some((n) => lower.startsWith(n));
+  const conditionals = CONDITIONAL_WORDS.filter((c) => toks.includes(c) || lower.includes(c)).length;
+  const deadlineValue = DEADLINE_WORDS.find((d) => lower.includes(d)) ?? null;
+  const deadlineSoon = URGENT_WORDS.some((u) => lower.includes(u)) || deadlineValue != null;
+  const vague = VAGUE_WORDS.some((b) => lower.includes(b));
+
+  const evidenceKinds: string[] = [];
+  if (v) evidenceKinds.push("verb");
+  if (recipient) evidenceKinds.push("recipient");
+  if (topic) evidenceKinds.push("topic");
+  if (place) evidenceKinds.push("place");
+  if (tool) evidenceKinds.push("tool");
+  if (scopeWord) evidenceKinds.push("scope");
+  if (deadlineValue) evidenceKinds.push("deadline");
+
+  return {
+    raw: rawTitle,
+    title,
+    locale,
+    action: {
+      verb: v?.base ?? null,
+      phrase: v?.phrase ?? null,
+      position: !v ? "none" : v.index === 0 ? "initial" : v.index <= Math.ceil(chunks.length * 0.4) ? "mid" : "late",
+      strength: v ? 0.9 : 0,
+    },
+    target: { object: extractObject(title, v?.base ?? null), strength: v ? 0.85 : 0.6 },
+    recipient,
+    topic,
+    place,
+    tool,
+    deadline: { value: deadlineValue, soon: deadlineSoon },
+    scope: { word: scopeWord, strength: scopeWord ? (scopeStrong ? 3 : 2) : 0 },
+    negated,
+    conditionals,
+    conjunctions,
+    length: toks.length,
+    vague,
+    evidenceKinds,
+  };
+}
+
+/* ---------------- stage 3: weighted feature classifier ---------------- */
+
+interface Feature {
+  test: (p: ParsedIntent) => boolean;
+  /** Evidence weight. Verb evidence > noun evidence > context boosts. */
+  w: number;
+  /** Short evidence label recorded in structureEvidence. */
+  why: string;
+}
+
+const hasTok = (p: ParsedIntent, ...words: string[]): boolean =>
+  words.some((w) => p.title.toLowerCase().includes(w));
+
+const verbIs = (p: ParsedIntent, ...verbs: string[]): boolean =>
+  !!p.action.verb && verbs.some((v) => p.action.verb === v || stem(p.action.verb ?? "") === v);
+
+const objHas = (p: ParsedIntent, ...words: string[]): boolean =>
+  words.some((w) => {
+    const t = tokenize(w);
+    return p.target.object.toLowerCase().includes(w) || t.every((x) => p.target.object.toLowerCase().includes(x));
+  });
+
+/**
+ * Weighted, explainable structure features. Verb evidence outweighs
+ * noun evidence; contextual boosts disambiguate — a recipient turns
+ * "write an email to Sarah" into communication, not writing.
+ */
+const STRUCTURE_FEATURES: Record<Structure, Feature[]> = {
+  writing: [
+    { test: (p) => verbIs(p, "write", "draft", "compose", "اكتب"), w: 3, why: "verb:write" },
+    { test: (p) => objHas(p, "essay", "article", "blog", "post", "paper", "report", "thesis", "letter", "caption", "novel", "story", "script", "summary", "مقال", "مقالة", "تقرير", "مدونة"), w: 2, why: "object:writable" },
+  ],
+  communication: [
+    { test: (p) => verbIs(p, "reply", "respond", "email", "text", "message", "call", "contact", "send", "answer", "رد", "اتصل", "راسل", "ابعت"), w: 3, why: "verb:communicate" },
+    { test: (p) => objHas(p, "email", "emails", "inbox", "message", "messages", "replies", "slack", "dm", "رسالة", "رسائل", "بريد", "واتساب"), w: 2, why: "object:channel" },
+    { test: (p) => p.recipient != null, w: 1.5, why: "recipient:present" },
+    { test: (p) => /reach out|follow up|followup|get back to/.test(p.title.toLowerCase()), w: 2, why: "phrase:follow-up" },
+  ],
+  cleaning: [
+    { test: (p) => verbIs(p, "clean", "tidy", "declutter", "wash", "scrub", "sweep", "mop", "dust", "vacuum", "نظف", "رتب"), w: 3, why: "verb:clean" },
+    { test: (p) => objHas(p, "laundry", "dishes", "mess", "trash", "room", "apartment", "house", "kitchen", "أطباق", "صحون", "شقة", "غسيل"), w: 2, why: "object:cleanable" },
+  ],
+  research: [
+    { test: (p) => verbIs(p, "research", "compare", "investigate", "analyze", "analyse", "ابحث"), w: 3, why: "verb:research" },
+    { test: (p) => /look into|find out|read up|which .* best/.test(p.title.toLowerCase()), w: 2.5, why: "phrase:inquiry" },
+    { test: (p) => objHas(p, "options", "survey", "quotes"), w: 1.5, why: "object:comparison" },
+  ],
+  deciding: [
+    { test: (p) => verbIs(p, "decide", "choose", "pick", "select"), w: 3, why: "verb:decide" },
+    { test: (p) => hasTok(p, "whether", "decision", "choice") || /commit to|cancel or/.test(p.title.toLowerCase()), w: 2, why: "token:choice" },
+  ],
+  learning: [
+    { test: (p) => verbIs(p, "study", "revise", "learn", "ذاكر", "ادرس"), w: 3, why: "verb:study" },
+    { test: (p) => objHas(p, "exam", "test", "homework", "course", "lecture", "flashcards", "textbook", "chapter", "امتحان", "اختبار", "مراجعة", "درس"), w: 2, why: "object:study-material" },
+  ],
+  creating: [
+    { test: (p) => verbIs(p, "draw", "paint", "design", "sketch", "compose", "sew", "knit", "bake", "craft", "film"), w: 3, why: "verb:create" },
+    { test: (p) => objHas(p, "song", "music", "video", "photo", "logo", "poster", "shelf"), w: 2, why: "object:artifact" },
+  ],
+  errand: [
+    { test: (p) => verbIs(p, "buy", "order", "renew", "book", "schedule", "reserve", "cancel", "deliver", "اشتر"), w: 2.5, why: "verb:errand" },
+    { test: (p) => objHas(p, "groceries", "grocery", "pharmacy", "store", "bank", "post", "mail", "appointment", "taxes", "tax", "invoice", "bill", "form", "application", "بقالة", "موعد", "فاتورة"), w: 2, why: "object:admin-or-purchase" },
+  ],
+  fixing: [
+    { test: (p) => verbIs(p, "fix", "repair", "debug", "mend", "troubleshoot", "صلح"), w: 3, why: "verb:fix" },
+    { test: (p) => objHas(p, "bug", "error", "leak", "crack", "عطل", "مكسور") || /not working|broken/.test(p.title.toLowerCase()), w: 2, why: "object:defect" },
+  ],
+  organizing: [
+    { test: (p) => verbIs(p, "organize", "organise", "sort", "file", "arrange", "catalog", "archive", "نظم"), w: 3, why: "verb:organize" },
+    { test: (p) => objHas(p, "folders", "documents", "paperwork", "inventory", "drawers", "closet", "files", "ملفات", "أوراق"), w: 2, why: "object:collection" },
+  ],
+  prep: [
+    { test: (p) => verbIs(p, "prepare", "prep", "pack", "جهز"), w: 2.5, why: "verb:prepare" },
+    { test: (p) => /set up|setup|get ready|plan for/.test(p.title.toLowerCase()), w: 2.5, why: "phrase:setup" },
+  ],
+  project: [
+    { test: (p) => verbIs(p, "build", "develop", "code", "launch"), w: 2, why: "verb:build" },
+    { test: (p) => objHas(p, "website", "app", "business", "startup", "portfolio", "renovation", "launch", "campaign", "channel", "مشروع", "موقع") || hasTok(p, "project"), w: 2.5, why: "object:endeavor" },
+  ],
+  generic: [],
+};
+
+/** Stage 3 — score every structure; confidence flows from the margin. */
+export function classifyTaskParsed(p: ParsedIntent): StructureScore {
+  const ranked: Array<{ structure: Structure; score: number; evidence: string[] }> = [];
+  for (const structure of Object.keys(STRUCTURE_FEATURES) as Structure[]) {
     let score = 0;
-    for (const k of keys) {
-      if (k.includes(" ")) {
-        if (joined.includes(k)) score += 3;
-      } else if (words.includes(k.replace(/ $/, ""))) {
-        score += 2;
-      } else if (joined.includes(k)) {
-        score += 1;
+    const evidence: string[] = [];
+    for (const f of STRUCTURE_FEATURES[structure]) {
+      if (f.test(p)) {
+        score += f.w;
+        evidence.push(f.why);
       }
     }
-    if (score > bestScore) {
-      bestScore = score;
-      best = structure;
-    }
+    ranked.push({ structure, score, evidence });
   }
-  if (bestScore === 0) {
-    for (const p of PROJECT_WORDS) {
-      if (joined.includes(p)) return { structure: "project", score: 2 };
+  ranked.sort((a, b) => b.score - a.score);
+  const top = ranked[0];
+  const second = ranked[1];
+
+  const conf = (score: number, margin: number): number =>
+    Math.min(0.95, 0.42 + Math.min(0.4, score * 0.1) + Math.min(0.13, margin * 0.04));
+
+  if (top.score === 0 || top.structure === "generic") {
+    const joined = p.title.toLowerCase();
+    if (PROJECT_WORDS.some((w) => joined.includes(w))) {
+      return { structure: "project", score: 2, confidence: 0.6, evidence: ["token:endeavor-word"] };
     }
+    return { structure: "generic", score: 0, confidence: 0.4, evidence: [] };
   }
-  const multi = /\band\b|,|;|\+/.test(title) || words.length > 9;
-  if (bestScore <= 2 && multi) return { structure: "project", score: bestScore };
-  return { structure: best, score: bestScore };
+  /* several weakly-related parts → treat as a project, not a coin flip */
+  const multiPart = p.conjunctions > 0 || p.length > 9;
+  if (multiPart && top.score <= 2.5) {
+    const margin = top.score - (second?.score ?? 0);
+    return { structure: "project", score: top.score, confidence: conf(top.score, margin), evidence: [...top.evidence, "shape:multi-part"] };
+  }
+  const margin = top.score - (second?.score ?? 0);
+  return { structure: top.structure, score: top.score, confidence: conf(top.score, margin), evidence: top.evidence };
+}
+
+/** Backward-compatible wrappers over the new classifier. */
+export function classifyTaskScored(words: string[], title: string): { structure: Structure; score: number } {
+  void words;
+  const r = classifyTaskParsed(parseTask(title));
+  return { structure: r.structure, score: Math.round(r.score) };
 }
 
 export function classifyTask(words: string[], title: string): Structure {
   return classifyTaskScored(words, title).structure;
 }
 
-function extractVerb(words: string[]): { verb: string; phrase: string } | null {
-  for (const w of words) {
-    const base = w.replace(/(ing|s|ed)$/, "");
-    if (VERBS[w]) return { verb: w, phrase: VERBS[w] };
-    if (VERBS[base]) return { verb: base, phrase: VERBS[base] };
-    if (w.endsWith("ing") && VERBS[base]) return { verb: base, phrase: VERBS[base] };
-  }
-  return null;
-}
+/* ---------------- object extraction (entity-preserving) ---------------- */
 
 /**
  * Extract the concrete object phrase while PRESERVING the user's
@@ -185,7 +441,6 @@ function extractObject(title: string, verb: string | null): string {
     if (idx >= 0) start = idx + verb.length;
   }
   const rest = title.slice(start).trim().replace(/^[:\-–—\s]+/, "");
-  /* keep ORIGINAL chunks; filter by their normalized tokens */
   const chunks = rest.split(/\s+/).filter(Boolean);
   let kept = chunks.filter((c) => {
     const toks = tokenize(c);
@@ -216,9 +471,7 @@ const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 /**
  * THE numeric safety gate for the whole engine. Every producer of a
  * step size routes through here, so a size can never reach the UI as
- * undefined, NaN, negative or > 4. Non-finite input is a contract
- * violation that cannot happen upstream any more; the middle of the
- * ladder is the least-surprising mapped value if it ever did.
+ * undefined, NaN, negative or > 4.
  */
 export function clampLevel(n: number): Level {
   if (!Number.isFinite(n)) return 2;
@@ -227,9 +480,8 @@ export function clampLevel(n: number): Level {
 
 /**
  * Classify WHERE the task happens — the hard compatibility dimension.
- * Digital evidence: digital wording or an app requirement. Physical
- * evidence: physical wording or a named location. A named tool alone
- * is NOT digital evidence (a guitar is a tool, not a screen).
+ * A named tool alone is NOT digital evidence (a guitar is a tool,
+ * not a screen).
  */
 export function classifyMedium(
   digital: boolean,
@@ -245,89 +497,101 @@ export function classifyMedium(
   return "unknown";
 }
 
-/** Stages 3–4 — complexity, friction and everything that shapes initiation. */
+/* ---------------- stage 4: full analysis ---------------- */
+
 export function analyzeTask(rawTitle: string): TaskAnalysis {
-  const title = normalizeTask(rawTitle);
+  const p = parseTask(rawTitle);
+  const title = p.title;
   const words = tokenize(title);
-  const v = extractVerb(words);
   const lower = title.toLowerCase();
-  const classified = classifyTaskScored(words, title);
-  const structure = classified.structure;
 
-  const multiPart = /\band\b|,|;/.test(lower) || words.length > 9;
-  const scopeWord = BIG_WORDS.find((b) => lower.includes(b)) ?? null;
-  const vague = VAGUE_WORDS.some((b) => lower.includes(b));
-  const hasDeadline = DEADLINE_WORDS.some((b) => lower.includes(b));
+  const cls = classifyTaskParsed(p);
+  const structure = cls.structure;
 
-  const actionCount = Math.min(3, (lower.match(/\band\b|,/g) ?? []).length + (words.length > 9 ? 1 : 0));
-  const dependencies = Math.min(
-    3,
-    (["before", "after", "once", "when", "waiting", "need"].filter((d) => lower.includes(d)).length +
-      (multiPart ? 1 : 0)),
-  );
-  const digital = DIGITAL_WORDS.some((d) => lower.includes(d));
-  const physical = PHYSICAL_WORDS.some((p) => words.includes(p));
-  const needsApp = APP_WORDS.some((p) => lower.includes(p));
+  const multiPart = p.conjunctions > 0 || p.length > 9;
+  const scopeWord = p.scope.word;
+  const scopeStrength = p.scope.strength || (multiPart ? 1 : 0);
+  const vague = p.vague;
+  const hasDeadline = p.deadline.soon;
+
+  const actionCount = Math.min(3, p.conjunctions + (p.length > 9 ? 1 : 0));
+  const dependencies = Math.min(3, p.conditionals + (multiPart ? 1 : 0));
+
+  /* medium evidence — verbs, recipients and tools count as signals */
+  const digScore =
+    (DIGITAL_WORDS.some((d) => lower.includes(d)) ? 2 : 0) +
+    (p.action.verb && SCREEN_VERBS.has(p.action.verb) ? 2 : 0) +
+    (p.action.verb && COMM_VERBS.has(p.action.verb) && p.recipient ? 1.5 : 0);
+  const physScore =
+    (PHYSICAL_WORDS.some((w) => words.includes(w)) ? 2 : 0) +
+    (p.action.verb && BODY_VERBS.has(p.action.verb) ? 2 : 0) +
+    (p.place ? 2 : 0);
+
+  const digital = digScore >= 2 || APP_WORDS.some((w) => lower.includes(w));
+  const physical = physScore >= 2;
+  const needsApp = APP_WORDS.some((w) => lower.includes(w));
+  const place = p.place?.value ?? null;
+  const medium = classifyMedium(digital, physical, needsApp, place);
+
   const clearFirstStep = FIRSTSTEP_WORDS.some((f) => words[0] === f) || lower.includes("open ");
   const stakes = STAKE_WORDS.filter((s) => lower.includes(s)).length;
   const person = findFirst(words, PEOPLE);
+  const object = p.target.object;
 
-  /* effort: length of ask + scope + structure hints */
-  let effort = words.length > 7 ? 1 : 0;
+  /* effort */
+  let effort = p.length > 7 ? 1 : 0;
   if (scopeWord) effort += 1;
   if (["project", "organizing", "cleaning", "research"].includes(structure)) effort += 1;
   effort = Math.min(3, effort);
 
-  /* scope strength: 0 bounded … 3 whole-domain ("clean my ENTIRE apartment") */
-  let scopeStrength = 0;
-  if (scopeWord) scopeStrength = STRONG_SCOPE_WORDS.includes(scopeWord.trim()) ? 3 : 2;
-  else if (multiPart) scopeStrength = 1;
-
-  /* complexity: how big/abstract the ask is */
+  /* complexity */
   let complexity = 0;
   if (multiPart) complexity += 1;
   if (scopeStrength >= 2 || vague) complexity += 1;
-  if (words.length > 8 || PROJECT_WORDS.some((p) => lower.includes(p))) complexity += 1;
+  if (p.length > 8 || PROJECT_WORDS.some((w) => lower.includes(w))) complexity += 1;
   if (scopeStrength >= 3) complexity += 1;
   complexity = Math.min(3, complexity);
 
   /* ambiguity: would a stranger know the first physical move? */
   let ambiguity = 0.15;
   if (vague) ambiguity += 0.45;
-  if (!v) ambiguity += 0.2;
+  if (!p.action.verb) ambiguity += 0.2;
   if (complexity >= 2) ambiguity += 0.15;
   if (clearFirstStep) ambiguity -= 0.25;
+  if (p.recipient || p.topic) ambiguity -= 0.05;
+  if (cls.confidence >= 0.7) ambiguity -= 0.05;
   ambiguity = clamp01(ambiguity);
 
   const uncertainty = clamp01(ambiguity * 0.6 + (clearFirstStep ? 0 : 0.2) + dependencies * 0.08);
-  const emotionalFriction = clamp01(stakes * 0.22 + (person ? 0.12 : 0) + (scopeWord ? 0.15 : 0) + (vague ? 0.1 : 0));
+  const emotionalFriction = clamp01(
+    stakes * 0.22 + (person || p.recipient ? 0.12 : 0) + (scopeWord ? 0.15 : 0) + (vague ? 0.1 : 0) + (hasDeadline ? 0.12 : 0) + (p.negated ? 0.06 : 0),
+  );
   const avoidanceTriggers =
-    (scopeWord ? 1 : 0) + (vague ? 1 : 0) + (hasDeadline ? 1 : 0) + (person ? 1 : 0) + (stakes > 0 ? 1 : 0);
-  const place = findFirst(words, PLACES);
-  const medium = classifyMedium(digital, physical, needsApp, place);
-  const locale = /[\u0600-\u06FF]/.test(title) ? "ar" : "en";
+    (scopeWord ? 1 : 0) + (vague ? 1 : 0) + (hasDeadline ? 1 : 0) + (person || p.recipient ? 1 : 0) + (stakes > 0 ? 1 : 0) + (p.negated ? 1 : 0);
 
-  /* deterministic per-inference confidence */
-  const digEvidence = (digital ? 1 : 0) + (needsApp ? 1 : 0);
-  const physEvidence = (physical ? 1 : 0) + (place ? 1 : 0);
+  /* confidence — margin-based, honest, not decorative */
   const mediumConfidence =
-    digEvidence === 0 && physEvidence === 0 ? 0.35 : digEvidence > 0 && physEvidence > 0 ? 0.85 : 0.75;
+    digScore === 0 && physScore === 0
+      ? 0.35
+      : digScore > 0 && physScore > 0
+        ? 0.85
+        : 0.72 + Math.min(0.18, Math.abs(digScore - physScore) * 0.05);
   const analysisConfidence = {
-    structure: Math.min(0.95, 0.45 + classified.score * 0.18),
-    medium: mediumConfidence,
-    verb: v ? 0.9 : 0.4,
-    object: extractObject(title, v?.verb ?? null).split(/\s+/).length >= 2 ? 0.8 : 0.6,
+    structure: Math.round(cls.confidence * 100) / 100,
+    medium: Math.round(mediumConfidence * 100) / 100,
+    verb: p.action.strength > 0 ? 0.9 : 0.4,
+    object: object.split(/\s+/).length >= 2 ? 0.8 : 0.6,
     barrier: 0.5,
   };
 
   return {
     title,
     structure,
-    verb: v?.verb ?? null,
-    verbPhrase: v?.phrase ?? null,
-    object: extractObject(title, v?.verb ?? null),
+    verb: p.action.verb,
+    verbPhrase: p.action.phrase,
+    object,
     place,
-    tool: findFirst(words, TOOLS),
+    tool: p.tool?.value ?? null,
     person,
     complexity,
     ambiguity,
@@ -344,13 +608,19 @@ export function analyzeTask(rawTitle: string): TaskAnalysis {
     avoidanceTriggers,
     scopeWord,
     scopeStrength,
+    recipient: p.recipient,
+    topic: p.topic,
+    deadlineSoon: hasDeadline,
+    negated: p.negated,
+    conditionals: p.conditionals,
+    structureEvidence: cls.evidence,
     analysisConfidence,
-    locale,
+    locale: p.locale,
     analysisVersion: ANALYSIS_VERSION,
   };
 }
 
-/* ---------------- barrier hypothesis ---------------- */
+/* ---------------- stage 5: barrier hypothesis ---------------- */
 
 export interface BarrierHypothesis {
   barrier: Barrier;
@@ -362,11 +632,10 @@ export interface BarrierHypothesis {
 const TASK_SIDE: Barrier[] = ["unclear", "overwhelmed"];
 
 /**
- * Stage 5 — reason about WHY the user is stuck.
- * A user-named barrier wins. Otherwise the task's own signals
- * suggest the most likely one — and we separate TASK problems
- * (fix by clarifying/decomposing) from STARTING problems (fix by
- * cutting initiation friction).
+ * Reason about WHY the user is stuck. A user-named barrier wins.
+ * Otherwise the parse's own signals suggest the most likely one —
+ * separating TASK problems (fix by clarifying/decomposing) from
+ * STARTING problems (fix by cutting initiation friction).
  */
 export function diagnoseBarrier(a: TaskAnalysis, named: Barrier | null): BarrierHypothesis {
   if (named) {
@@ -385,18 +654,21 @@ export function diagnoseBarrier(a: TaskAnalysis, named: Barrier | null): Barrier
   if (a.emotionalFriction >= 0.45) {
     return { barrier: "anxiety", kind: "starting", reason: "high stakes detected in the wording" };
   }
+  if (a.negated) {
+    return { barrier: "avoiding", kind: "starting", reason: "the task is framed as something to avoid" };
+  }
   if (a.avoidanceTriggers >= 3) {
     return { barrier: "avoiding", kind: "starting", reason: "multiple classic avoidance triggers present" };
   }
   return { barrier: "unknown", kind: "starting", reason: "no strong signal — assume friction, not confusion" };
 }
 
-/* ---------------- capacity ---------------- */
+/* ---------------- stage 6: capacity ---------------- */
 
 /**
- * Stage 6 — estimate current initiation capacity from observable
- * signals only: time of day, named energy barriers, and recent
- * momentum. Never infers character or motivation.
+ * Estimate current initiation capacity from observable signals only:
+ * time of day, named energy barriers, and recent momentum. Never
+ * infers character or motivation.
  */
 export function estimateCapacity(
   hour: number,
@@ -449,8 +721,7 @@ export function pick<T>(arr: T[], seed: number): T {
 
 /**
  * Unicode-safe normalization for COMPARISON ONLY (never displayed).
- * Strips punctuation and diacritics but keeps letters of every script —
- * Arabic stays Arabic, accents collapse safely for matching.
+ * Keeps letters of every script — Arabic stays Arabic.
  */
 export function normalizeAction(s: string): string {
   return s
@@ -484,10 +755,8 @@ const INTENT_NOISE = new Set([
 /**
  * Intent fingerprint — THE canonical semantic-duplicate key, used by
  * EVERY dedupe path (selection, ladders, recovery, fallbacks).
- * Levels covered: normalized text → numeral/quantifier collapse →
- * possessive folding → verb-synonym canonicalization → order-independent
- * token set. "Open John's email", "Click John's email" and "Open the
- * email from John" all collide; genuinely different moves never do.
+ * "Open John's email", "Click John's email" and "Open the email from
+ * John" all collide; genuinely different moves never do.
  */
 export function intentKey(s: string): string {
   const canon = new Set<string>();

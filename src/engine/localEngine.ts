@@ -14,6 +14,7 @@ export {
   analyzeTask,
   classifyMedium,
   classifyTask,
+  classifyTaskParsed,
   clampLevel,
   diagnoseBarrier,
   estimateCapacity,
@@ -21,6 +22,7 @@ export {
   intentKey,
   normalizeAction,
   normalizeTask,
+  parseTask,
   pick,
 } from "./analysis";
 export { computeProfile, durationLabel, emptyProfile, learnFromOutcome, secondsLabel, updateProfile } from "./profile";
@@ -579,6 +581,34 @@ export function runEngineTests(): TestResults {
     const sessions = Array.from({ length: 8 }, (_, i) => session(i, 3, i < 6 ? "kept" : "stopped"));
     const off = emptyProfile(sessions.length);
     ok(off.bestSize === null && off.bestStrategy === null && off.confidence === "none", "learning/disabled-is-empty", JSON.stringify(off.bestSize));
+  }
+
+  /* ---------- T-P · semantic parse & contextual classification (analysis v4) ---------- */
+  {
+    const a = analyzeTask("email Sarah about the invoice");
+    ok(a.recipient === "Sarah", "parse/recipient-sarah", a.recipient ?? "null");
+    ok((a.topic ?? "").toLowerCase().includes("invoice"), "parse/topic-invoice", a.topic ?? "null");
+    ok(a.structure === "communication", "parse/comm-not-writing", a.structure);
+    ok(a.medium === "digital", "parse/comm-digital", a.medium);
+
+    const b = analyzeTask("Reply to John's email");
+    ok(b.recipient === "John", "parse/recipient-john", b.recipient ?? "null");
+    ok(/John's/i.test(b.object), "parse/object-keeps-possessive", b.object);
+
+    /* a recipient flips “write an email” from writing to communication */
+    const c = analyzeTask("write an email to Sarah");
+    ok(c.structure === "communication", "parse/recipient-shifts-to-comm", c.structure);
+
+    const d = analyzeTask("رد على رسالة أحمد عن الفاتورة");
+    ok(d.recipient === "أحمد", "parse/arabic-recipient", d.recipient ?? "null");
+    ok((d.topic ?? "").includes("الفاتورة"), "parse/arabic-topic", d.topic ?? "null");
+
+    const e = analyzeTask("don't skip the gym today");
+    ok(e.negated === true, "parse/negation", String(e.negated));
+
+    const f = analyzeTask("study for my chemistry exam");
+    ok(f.structureEvidence.length > 0, "parse/evidence-recorded", f.structureEvidence.join(","));
+    ok(f.analysisConfidence.structure >= 0.6, "parse/confidence-from-margin", String(f.analysisConfidence.structure));
   }
 
   /* ---------- global invariants over everything emitted above ---------- */
