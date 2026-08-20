@@ -254,7 +254,10 @@ export function parseTask(rawTitle: string): ParsedIntent {
   const scopeWord = SCOPE_WORDS.find((b) => lower.includes(b)) ?? null;
   const scopeStrong = scopeWord ? STRONG_SCOPE_WORDS.some((s) => lower.includes(s)) : false;
 
-  const conjunctions = (lower.match(/\band\b|,|;|؛| و /g) ?? []).length;
+  /* conjunctions: explicit separators + Arabic conjunctive waw that
+     STARTS a word ("وغسل") — mid-word waw (الموعد) is not a separator */
+  const wawConjunctions = (title.match(/(?<=[\s\p{N}])و(?=\S)|^و(?=\S)/gu) ?? []).length;
+  const conjunctions = (lower.match(/\band\b|,|;|؛/g) ?? []).length + wawConjunctions;
   const negated = NEGATION_STARTS.some((n) => lower.startsWith(n));
   const conditionals = CONDITIONAL_WORDS.filter((c) => toks.includes(c) || lower.includes(c)).length;
   const deadlineValue = DEADLINE_WORDS.find((d) => lower.includes(d)) ?? null;
@@ -479,8 +482,11 @@ function extractObject(title: string, verb: string | null): string {
 function extractParts(title: string): string[] {
   const raw = title.trim();
   if (!raw) return [];
+  /* Arabic conjunction waw counts ONLY when it starts a word (وغسل =
+     "and wash"), never inside a word (الموعد, الوحدة) — splitting
+     mid-word fabricated phantom parts and a false "overwhelmed". */
   const segs = raw
-    .split(/\s*(?:,|;|،|\band\b|&|\+|\bthen\b|\bafter\b|و)\s*/i)
+    .split(/\s*(?:,|;|،|\band\b|&|\+|\bthen\b|\bafter\b|(?<=[\s\p{N}])و(?=\S)|^و(?=\S))/iu)
     .map((s) => s.trim())
     .filter(Boolean);
   if (segs.length < 2) return [];
@@ -785,7 +791,7 @@ export function normalizeAction(s: string): string {
   return s
     .normalize("NFC")
     .toLowerCase()
-    .replace(/[̀\u2018̀\u2019']/g, "")
+    .replace(/[\u2018\u2019']/g, "")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();

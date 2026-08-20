@@ -561,6 +561,16 @@ export function runEngineTests(): TestResults {
     const p2 = planFirstStep(ar2, {});
     ok(leaks(p2.action, BANNED_FOR_DIGITAL).length === 0, "arabic/no-physical-leak", p2.action);
     emit(p2.action, p2.size);
+
+    /* waw inside a word is NOT a separator — no phantom multi-part */
+    const ar3 = analyzeTask("ذاكر الوحدة الثالثة");
+    ok(ar3.parts.length === 0, "arabic/waw-midword-no-split", JSON.stringify(ar3.parts));
+    ok(ar3.actionCount === 0, "arabic/waw-midword-no-conjunction", String(ar3.actionCount));
+
+    /* conjunctive waw starting a word IS a separator */
+    const ar4 = analyzeTask("نظف المطبخ وغسل الصحون");
+    ok(ar4.parts.length >= 2, "arabic/waw-conjunctive-splits", JSON.stringify(ar4.parts));
+    ok(ar4.actionCount >= 1, "arabic/waw-conjunctive-counted", String(ar4.actionCount));
   }
 
   /* ---------- T-M · analysis contract fields (§9) ---------- */
