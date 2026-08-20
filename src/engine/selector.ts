@@ -69,6 +69,7 @@ const W = {
   historyFit: 0.1,
   confidence: 0.1,
   novelty: 0.08,
+  sizeFit: 0.1,
   effort: 0.18,
   initiation: 0.14,
   ambiguity: 0.1,
@@ -76,7 +77,7 @@ const W = {
   emotional: 0.14,
 } as const;
 
-const MEM_CAP = 14;
+const MEM_CAP = 28;
 const FAILED_ACTION_CAP = 10;
 
 export function emptyMemory(): EngineMemory {
@@ -244,6 +245,15 @@ export function sizeFor(ctx: SizeCtx): Level {
   };
   if (ctx.barrier) size = Math.max(size, barrierBase[ctx.barrier] ?? 1);
 
+  /* NO named barrier: infer the entry point from the wording itself.
+     A user who didn't name a block still gets a smaller doorway when the
+     task reads as vague, avoidance-laden or emotionally heavy — we never
+     assume a big first move is fine just because they stayed silent. */
+  if (!ctx.barrier) {
+    if (a.ambiguity >= 0.5 || a.avoidanceTriggers >= 3) size = Math.max(size, 2);
+    if (a.emotionalFriction >= 0.5) size = Math.max(size, 2);
+  }
+
   /* low capacity → never start big */
   if (ctx.capacityEnergy != null && ctx.capacityEnergy < 0.5) size = Math.max(size, 2);
 
@@ -369,13 +379,20 @@ function scoreCandidate(c: CandidateAction, ctx: GenCtx): number {
   const energy = ctx.capacityEnergy ?? 0.75;
   const energyFit = energy < 0.55 ? (1 - k.initiation) * 0.12 + (1 - k.effort) * 0.08 : 0;
 
+  /* sizeFit: strategies whose declared size band actually contains the
+     target size score higher — this ties selection to sizeFor() so a
+     step sized "tiny" isn't handed a strategy that only shines at full size */
+  const band = STRATEGY_MAP[c.strategy].sizes;
+  const sizeFit = c.size >= band[0] && c.size <= band[1] ? 1 : c.size < band[0] ? 0.4 : 0.2;
+
   const score =
     W.progress * k.progress +
     W.barrierFit * barrierFit +
     W.preferenceFit * preferenceFit +
     W.historyFit * historyFit +
     W.confidence * k.confidence +
-    W.novelty * textFresh -
+    W.novelty * textFresh +
+    W.sizeFit * sizeFit -
     W.effort * k.effort -
     W.initiation * k.initiation -
     W.ambiguity * k.ambiguity -
@@ -419,6 +436,9 @@ function buildCandidates(ctx: GenCtx): CandidateAction[] {
   const push = (action: string, strategy: StrategyId, source: CandidateAction["source"]) => {
     const k = normalizeAction(action);
     if (seen.has(k)) return;
+    /* skip anything already shown this session — the engine never re-serves
+       a previously surfaced action while a distinct valid one exists */
+    if (wasShown(ctx.memory, action)) return;
     /* every candidate — template, decompose or fallback — passes the ONE validator */
     if (!validateCandidate(action, a, strategy, ctx.size, source).valid) return;
     seen.add(k);

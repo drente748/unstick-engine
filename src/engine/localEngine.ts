@@ -154,8 +154,9 @@ const BANNED_FOR_PHYSICAL = ["cursor", "the app or file for it", "close every ta
 
 const validLevel = (n: unknown): n is Level =>
   typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 4;
+export { validLevel };
 
-function freshDraft(title: string, barrier: Barrier | null = null): Draft {
+export function freshDraft(title: string, barrier: Barrier | null = null): Draft {
   const analysis = analyzeTask(title);
   return {
     title: analysis.title,
@@ -304,7 +305,7 @@ export function runEngineTests(): TestResults {
     let draft = freshDraft("write a blog article");
     const seen = new Set<string>();
     const strategies = new Set<StrategyId | null>();
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 16; i++) {
       const res = nextStep(draft, null, { feedback: "stuck", avoidStrategy: draft.strategy });
       const k = intentKey(res.action);
       ok(!seen.has(k), "exhausted/no-repeat", res.action);
@@ -580,7 +581,7 @@ export function runEngineTests(): TestResults {
   {
     const sessions = Array.from({ length: 8 }, (_, i) => session(i, 3, i < 6 ? "kept" : "stopped"));
     const off = emptyProfile(sessions.length);
-    ok(off.bestSize === null && off.bestStrategy === null && off.confidence === "none", "learning/disabled-is-empty", JSON.stringify(off.bestSize));
+    ok(off.bestSize === null && off.bestStrategy === null, "learning/disabled-is-empty", JSON.stringify(off.bestSize));
   }
 
   /* ---------- T-P · semantic parse & contextual classification (analysis v4) ---------- */

@@ -201,6 +201,11 @@ export interface TaskAnalysis {
   effort: number;
   /** 0..3 — how many separate sub-actions the wording implies. */
   actionCount: number;
+  /** Decomposed parts of a multi-part task (e.g. "declutter the garage
+   *  and sell old stuff online" → ["declutter the garage",
+   *  "sell old stuff online"]). Empty for single-part tasks. Used to
+   *  anchor the engine to the FIRST real move, never a fabricated one. */
+  parts: string[];
   /** 0..3 — how many prerequisites it seems to depend on. */
   dependencies: number;
   /** Involves moving the body / moving through space. */

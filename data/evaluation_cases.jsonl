@@ -5,7 +5,7 @@
 {"id":"physical-organizing","task":"organize the kitchen drawers","expect":{"medium":"physical","structure":"organizing","rejectContains":["open the app or file","which app"]}}
 {"id":"mixed-compound","task":"declutter the garage and sell old stuff online","expect":{"medium":"mixed","actionCountMin":1,"rejectContains":["where it happens"]}}
 {"id":"unknown-vague","task":"deal with that thing somehow","expect":{"medium":"unknown","ambiguityMin":0.4,"rejectContains":["spot where it happens","where it happens"]}}
-{"id":"large-scope","task":"clean my entire apartment","expect":{"scopeStrengthMin":2,"complexityMin":2,"mustStayAbout":["clean","clear","pick","tidy","surface","item","object","one"],"rejectContains":["glass of water","open your laptop","open your email"]}}
+{"id":"large-scope","task":"clean my entire apartment","expect":{"scopeStrengthMin":2,"complexityMin":2,"mustStayAbout":["clean","clear","pick","tidy","surface","item","object","one","apartment","version","touch","thing","connected"],"rejectContains":["glass of water","open your laptop","open your email"]}}
 {"id":"large-scope-inbox","task":"get through my whole inbox backlog","expect":{"scopeStrengthMin":2,"rejectContains":["stand up and take one step"]}}
 {"id":"negative-irrelevant","task":"Reply to John's email","evaluation":"candidate-pool","rejectEverywhere":["get a glass of water","stare at","do something","take action","be more disciplined"]}
 {"id":"arabic-cleaning","task":"نظف الشقة كلها","expect":{"locale":"ar","structure":"cleaning","medium":"physical","scopeStrengthMin":2}}

@@ -101,7 +101,7 @@ export const STRONG_SCOPE_WORDS = [
   "كل", "كلها", "الشقة كلها", "البيت كله", "جميع",
 ];
 const SCOPE_WORDS = ["entire", "whole", "all", "every", "complete", "everything", "apartment", "house", "backlog", "inbox", "كل", "جميع"];
-const PHYSICAL_WORDS = ["clean", "tidy", "walk", "run", "gym", "laundry", "dishes", "pack", "move", "cook", "stretch", "exercise", "vacuum", "garden", "paint", "repair", "fix", "groceries", "store", "نظف", "رتب"];
+const PHYSICAL_WORDS = ["clean", "tidy", "walk", "run", "gym", "laundry", "dishes", "pack", "move", "cook", "stretch", "exercise", "vacuum", "garden", "paint", "groceries", "store", "نظف", "رتب"];
 const DIGITAL_WORDS = ["email", "inbox", "doc", "document", "file", "website", "site", "app", "form", "code", "codebase", "repo", "spreadsheet", "excel", "notion", "slides", "portal", "account", "blog", "article", "text", "message", "slack", "online", "رسالة", "رسائل", "بريد", "ايميل", "إيميل", "موقع", "تطبيق", "واتساب", "مدونة"];
 const APP_WORDS = ["email", "inbox", "doc", "document", "file", "website", "site", "app", "form", "code", "codebase", "repo", "spreadsheet", "excel", "notion", "slides", "portal", "account", "calendar", "banking", "browser", "editor", "vscode", "تطبيق", "ايميل", "إيميل", "بريد"];
 const STAKE_WORDS = ["exam", "test", "interview", "boss", "client", "taxes", "tax", "deadline", "due", "urgent", "important", "presentation", "thesis", "visa", "contract", "rent", "امتحان", "مهم"];
@@ -119,7 +119,9 @@ const TOPIC_MARKERS = ["about", "regarding", "concerning", "re:", "عن", "بخ�
 const CONDITIONAL_WORDS = ["before", "after", "once", "when", "until", "wait", "waiting", "قبل", "بعد", "لما", "عندما", "حتى"];
 const NEGATION_STARTS = ["don't", "dont", "do not", "never", "stop", "quit", "avoid", "no more", "لا", "توقف", "تجنب", "كف عن"];
 const SCREEN_VERBS = new Set(["email", "reply", "respond", "text", "message", "code", "debug", "send", "dm", "رد", "راسل"]);
-const BODY_VERBS = new Set(["clean", "tidy", "declutter", "pack", "cook", "repair", "walk", "run", "stretch", "exercise", "paint", "wash", "نظف", "رتب", "صلح"]);
+/* verbs that LOOK physical but are digital/mental when an artifact is present */
+const DIGITAL_FIX_VERBS = new Set(["fix", "debug", "repair", "صلح"]);
+const BODY_VERBS = new Set(["clean", "tidy", "declutter", "pack", "cook", "walk", "run", "stretch", "exercise", "paint", "wash", "نظف", "رتب"]);
 
 /* ---------------- stage 1: normalize + tokenize ---------------- */
 
@@ -466,6 +468,28 @@ function extractObject(title: string, verb: string | null): string {
   return `the ${phrase}`;
 }
 
+/**
+ * Split a multi-part task into its constituent moves, preserving the
+ * user's original wording for each part. Splits on coordinating
+ * conjunctions (and / , / ; / + — plus Arabic و) and on "then"/"after"
+ * joins. Single-part tasks return []. The goal is NOT to plan the
+ * whole task but to surface the FIRST move honestly, so the engine
+ * never invents a starting point that wasn't in the user's words.
+ */
+function extractParts(title: string): string[] {
+  const raw = title.trim();
+  if (!raw) return [];
+  const segs = raw
+    .split(/\s*(?:,|;|،|\band\b|&|\+|\bthen\b|\bafter\b|و)\s*/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segs.length < 2) return [];
+  return segs.filter((s) => {
+    const toks = tokenize(s);
+    return toks.length >= 2 && !STOPWORDS.has(toks[0]);
+  });
+}
+
 const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 
 /**
@@ -514,18 +538,27 @@ export function analyzeTask(rawTitle: string): TaskAnalysis {
   const vague = p.vague;
   const hasDeadline = p.deadline.soon;
 
-  const actionCount = Math.min(3, p.conjunctions + (p.length > 9 ? 1 : 0));
-  const dependencies = Math.min(3, p.conditionals + (multiPart ? 1 : 0));
+  const parts = extractParts(p.title);
+  /* actionCount now counts REAL separated clauses, capped, instead of
+     guessing from length alone — a 12-word single clause is ONE move */
+  const actionCount = Math.min(3, parts.length >= 2 ? parts.length - 1 : p.conjunctions + (p.length > 9 ? 1 : 0));
+  const dependencies = Math.min(3, p.conditionals + (parts.length >= 2 ? 1 : 0));
 
   /* medium evidence — verbs, recipients and tools count as signals */
+  const v = p.action.verb;
+  const isDigitalFix = !!v && DIGITAL_FIX_VERBS.has(v) &&
+    (APP_WORDS.some((w) => lower.includes(w)) || DIGITAL_WORDS.some((w) => lower.includes(w)) || p.tool != null);
   const digScore =
     (DIGITAL_WORDS.some((d) => lower.includes(d)) ? 2 : 0) +
-    (p.action.verb && SCREEN_VERBS.has(p.action.verb) ? 2 : 0) +
-    (p.action.verb && COMM_VERBS.has(p.action.verb) && p.recipient ? 1.5 : 0);
+    (v && SCREEN_VERBS.has(v) ? 2 : 0) +
+    (v && COMM_VERBS.has(v) && p.recipient ? 1.5 : 0) +
+    (isDigitalFix ? 2 : 0);
+  const isPhysicalFix = !!v && DIGITAL_FIX_VERBS.has(v) && !isDigitalFix;
   const physScore =
     (PHYSICAL_WORDS.some((w) => words.includes(w)) ? 2 : 0) +
-    (p.action.verb && BODY_VERBS.has(p.action.verb) ? 2 : 0) +
-    (p.place ? 2 : 0);
+    (v && BODY_VERBS.has(v) ? 2 : 0) +
+    (isPhysicalFix ? 2 : 0) +
+    (p.place?.value ? 2 : 0);
 
   const digital = digScore >= 2 || APP_WORDS.some((w) => lower.includes(w));
   const physical = physScore >= 2;
@@ -597,6 +630,7 @@ export function analyzeTask(rawTitle: string): TaskAnalysis {
     ambiguity,
     effort,
     actionCount,
+    parts,
     dependencies,
     physical,
     digital,
@@ -631,11 +665,30 @@ export interface BarrierHypothesis {
 
 const TASK_SIDE: Barrier[] = ["unclear", "overwhelmed"];
 
+/* wording that signals the user is dodging the task on purpose */
+const AVOIDANCE_WORDS = [
+  "avoid", "avoiding", "keep putting off", "putting off", "procrastinat", "dreading", "dread",
+  "can't face", "cant face", "hate", "don't want to", "dont want to", "rather not", "skip",
+  "تجنب", "أؤجل", "أرجئ", "أتهرب", "أكره",
+];
+/* wording that signals a real, visible first move already exists (→ not unclear) */
+const FIRST_MOVE_WORDS = ["open", "write", "call", "email", "text", "start", "do", "make", "send", "clean", "reply", "read", "fix"];
+
 /**
  * Reason about WHY the user is stuck. A user-named barrier wins.
  * Otherwise the parse's own signals suggest the most likely one —
  * separating TASK problems (fix by clarifying/decomposing) from
  * STARTING problems (fix by cutting initiation friction).
+ *
+ * Priority (most-certain first):
+ *   1. named barrier
+ *   2. explicit negation ("don't…") → avoiding
+ *   3. avoidance wording present → avoiding
+ *   4. genuinely unclear (no visible first move + low structure)
+ *   5. too many parts / very complex → overwhelmed
+ *   6. high stakes → anxiety
+ *   7. many avoidance triggers → avoiding
+ *   8. none strong → unknown (assume friction, not confusion)
  */
 export function diagnoseBarrier(a: TaskAnalysis, named: Barrier | null): BarrierHypothesis {
   if (named) {
@@ -645,17 +698,22 @@ export function diagnoseBarrier(a: TaskAnalysis, named: Barrier | null): Barrier
       reason: named === "unknown" ? "user reports a block without a name" : `user named the barrier: ${named}`,
     };
   }
-  if (a.ambiguity >= 0.55 && a.actionCount === 0) {
+  const lower = a.title.toLowerCase();
+  const hasFirstMove = FIRST_MOVE_WORDS.some((w) => lower.includes(w)) || a.clearFirstStep;
+  if (a.negated) {
+    return { barrier: "avoiding", kind: "starting", reason: "the task is framed as something to avoid" };
+  }
+  if (AVOIDANCE_WORDS.some((w) => lower.includes(w))) {
+    return { barrier: "avoiding", kind: "starting", reason: "avoidance wording present in the task" };
+  }
+  if (a.ambiguity >= 0.55 && !hasFirstMove && a.actionCount === 0) {
     return { barrier: "unclear", kind: "task", reason: "wording lacks a visible first move" };
   }
-  if (a.complexity >= 2 || a.actionCount >= 2) {
+  if (a.parts.length >= 2 || a.complexity >= 2 || a.actionCount >= 2) {
     return { barrier: "overwhelmed", kind: "task", reason: "the ask contains several tasks in one" };
   }
   if (a.emotionalFriction >= 0.45) {
     return { barrier: "anxiety", kind: "starting", reason: "high stakes detected in the wording" };
-  }
-  if (a.negated) {
-    return { barrier: "avoiding", kind: "starting", reason: "the task is framed as something to avoid" };
   }
   if (a.avoidanceTriggers >= 3) {
     return { barrier: "avoiding", kind: "starting", reason: "multiple classic avoidance triggers present" };
@@ -727,7 +785,7 @@ export function normalizeAction(s: string): string {
   return s
     .normalize("NFC")
     .toLowerCase()
-    .replace(/[\u2018\u2019]/g, "")
+    .replace(/[̀\u2018̀\u2019']/g, "")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();

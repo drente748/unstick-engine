@@ -113,6 +113,10 @@ export const STRATEGIES: StrategyDef[] = [
       /* physical task without a named place — body meets the OBJECT, never a fabricated spot */
       { fits: (a) => isPhysical(a) && !hasPlace(a), render: (s) => `Pick up one thing that belongs to ${s.o}. Just hold it.` },
       { fits: (a) => isPhysical(a) && !hasPlace(a), render: () => `Clear one hand-sized space right in front of you.` },
+      /* more bodily variety for physical tasks without a named place */
+      { fits: (a) => isPhysical(a) && !hasPlace(a), render: (s) => `Touch the first thing connected to ${s.o}. Just touch it.` },
+      { fits: (a) => isPhysical(a) && !hasPlace(a), render: (s) => `Move one object that belongs to ${s.o} from here to there.` },
+      { fits: (a) => isPhysical(a) && !hasPlace(a), render: () => `Set a 60-second timer and do only what your hands are already near.` },
       /* bodily approaches for screen work — body + named digital artifact */
       { fits: isDigital, render: (s) => `Sit down, open ${s.t}, and put your hands on the keyboard.` },
       { fits: isDigital, render: (s) => `Close every tab except ${s.t}. Then just look at it.` },
@@ -139,6 +143,10 @@ export const STRATEGIES: StrategyDef[] = [
       { render: (s) => `Find ONE example of a finished ${s.o.replace(/^the /, "")}. Just look at it.` },
       { render: (s) => `Write down the three things ${s.o} needs — from memory, badly.` },
       { render: (s) => `Gather the two things ${s.o} needs into one spot. Don't use them yet.` },
+      /* extra information-start variety */
+      { render: (s) => `Write down the single question you'd need answered to start ${s.o}.` },
+      { render: (s) => `Skim the title and the first heading of ${s.o}. Nothing more.` },
+      { render: (s) => `Name the very first input ${s.o} needs — file, idea, or thing. Find just that.` },
     ],
   },
   {
@@ -151,6 +159,10 @@ export const STRATEGIES: StrategyDef[] = [
       { render: (s) => `Write the ONE choice blocking ${s.o}, then pick either side. Wrong is fine; it moves.` },
       { render: (s) => `Flip a coin for the first choice on ${s.o}. Heads you go with option A.` },
       { render: (s) => `Pick the version of ${s.o} that takes the least setup. Commit for 2 minutes only.` },
+      /* extra decision variety */
+      { render: (s) => `Write the one thing that's blocking ${s.o}. Circle it. That's the decision to make.` },
+      { render: (s) => `Take the easiest fork on ${s.o}. You can switch later — motion beats paralysis.` },
+      { render: (s) => `Decide the smallest open question on ${s.o}. Anything reversible counts.` },
     ],
   },
   {
@@ -163,6 +175,10 @@ export const STRATEGIES: StrategyDef[] = [
       { render: (s) => `One single unit of ${s.o} — one line, one item, one click. That's the whole task.` },
       { render: (s) => `Do ${s.v} for one breath's worth. Then stop and look.` },
       { render: (s) => `The tiniest real slice of ${s.o} — smaller than feels useful. That's the point.` },
+      /* extra tiny variety */
+      { render: (s) => `Do the smallest version of ${s.o} that still counts as having started.` },
+      { render: (s) => `Set a 25-second timer for ${s.o}. When it ends, you're allowed to stop. That's the win.` },
+      { render: (s) => `Do the part of ${s.o} a distracted version of you could still do. Just that.` },
     ],
   },
   {
@@ -188,6 +204,11 @@ export const STRATEGIES: StrategyDef[] = [
       { fits: (a) => ["writing", "communication", "creating", "project", "learning"].includes(a.structure) || isDigital(a),
         render: (s) => `Write the version of ${s.o} you'd never show anyone.` },
       { render: (s) => `Lower the bar to the floor: a clumsy, half-done start on ${s.o} is today's win.` },
+      /* extra permission variety */
+      { fits: (a) => ["writing", "communication", "creating", "project", "learning"].includes(a.structure) || isDigital(a),
+        render: (s) => `Type the worst opening line of ${s.o}. It will get deleted — that's the point.` },
+      { render: (s) => `Give yourself explicit permission to do ${s.o} badly for the next 90 seconds.` },
+      { render: (s) => `Make a deliberately ugly first attempt at ${s.o}. Ugly is allowed today.` },
     ],
   },
   {
@@ -200,6 +221,10 @@ export const STRATEGIES: StrategyDef[] = [
       { render: (s) => `Put everything about ${s.o} in front of you: tabs, papers, tools. Arrange nothing.` },
       { render: (s) => `Sketch ${s.o} as three ugly boxes on any paper.` },
       { render: (s) => `Lay out the pieces of ${s.o} where you can see them. Seeing is the step.` },
+      /* extra visual variety */
+      { render: (s) => `Open ${s.t ? `the place ${s.o} lives` : `where ${s.o} lives`} and take one screenshot — no editing.` },
+      { render: (s) => `Write the title of ${s.o} at the top of a blank page. That's setup done.` },
+      { render: (s) => `Put a single visible reminder of ${s.o} on your desk. One sticky note.` },
     ],
   },
   {
@@ -230,6 +255,10 @@ export const STRATEGIES: StrategyDef[] = [
       { fits: isDigital, render: (s) => `Ask: which app does ${s.o} live in? Open only that app.` },
       { render: (s) => `Ask: what would a 5-year-old do first with ${s.o}? Do exactly that.` },
       { render: (s) => `Ask: what's already done on ${s.o}? Start one inch past that point.` },
+      /* extra question variety */
+      { render: (s) => `Ask: if ${s.o} were a recipe, what's step one? Do only step one.` },
+      { render: (s) => `Ask out loud: what's the cheapest possible first move on ${s.o}? Then do it.` },
+      { render: (s) => `Ask: what would make ${s.o} 1% more started? Do that one thing.` },
     ],
   },
   {
@@ -400,9 +429,34 @@ export function decompose(a: TaskAnalysis, size: Level): string {
     4: `Open it or face it — just make contact. Nothing more.`,
   };
 
+  /* structure-specific ladders for study/thinking tasks — these bind the
+     first move to the ACT of engaging (open, read one unit, make one mark),
+     not to generic motion, so learning/research/creating never get a
+     "stand up and walk" rung. */
+  const study: Record<Level, string> = {
+    0: scopeRung(a),
+    1: `Open ${a.object} and read the first ${unit}. Stop after.`,
+    2: `Read one ${unit} of ${a.object}. Close it if you must.`,
+    3: `Put a finger on the first line of ${a.object}. That's contact made.`,
+    4: `Open ${a.object} and let the first page load. Nothing more.`,
+  };
+  const create: Record<Level, string> = {
+    0: scopeRung(a),
+    1: `Open the file/canvas for ${a.object} and make one mark. Ugly on purpose.`,
+    2: `Make one ${unit} of ${a.object}. A rough scribble counts.`,
+    3: `Put your cursor/hand where ${a.object} begins. 15 seconds only.`,
+    4: `Open the blank ${a.object} and stare at it for 10 seconds. Starting is the step.`,
+  };
+
   const table: Record<Medium, Record<Level, string>> = { digital, physical, mixed, unknown };
   if (a.structure === "communication" && (a.medium === "digital" || a.medium === "mixed" || a.medium === "unknown")) {
     return communication[size];
+  }
+  if (a.structure === "learning" || a.structure === "research") {
+    return (a.medium === "physical" ? table.physical : study)[size];
+  }
+  if (a.structure === "creating" || a.structure === "writing") {
+    return (a.medium === "physical" ? table.physical : create)[size];
   }
   return table[a.medium][size];
 }
