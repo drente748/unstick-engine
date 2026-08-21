@@ -12,14 +12,34 @@
 import { VERBS, tokenize, stem } from "../analysis";
 import type { SubIntent, TaskEntity } from "../types-v5";
 
-/** Find the base verb in a clause using the shared VERBS lexicon. */
+/** Find the base verb in a clause using the shared VERBS lexicon.
+ * Framing/avoidance auxiliaries ("keep putting off", "keep") are
+ * skipped when a REAL verb follows — the task hides behind them:
+ * "I keep putting off cleaning the garage" -> clean, not keep. */
+const FRAMING_VERBS = new Set(["keep", "keeps", "kept", "putting", "avoid", "avoiding", "postpone", "postponing", "delay", "delaying"]);
+
 export function findVerbBase(clauseText: string): { base: string; index: number } | null {
   const words = tokenize(clauseText);
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
-    if (VERBS[w]) return { base: w, index: i };
-    const s = stem(w);
-    if (VERBS[s]) return { base: s, index: i };
+    let base = VERBS[w] ? w : null;
+    if (!base) {
+      const s = stem(w);
+      if (VERBS[s]) base = s;
+    }
+    if (!base) continue;
+    /* framing verb with a real verb after it? skip to the real one */
+    if (FRAMING_VERBS.has(base)) {
+      for (let j = i + 1; j < words.length; j++) {
+        const w2 = words[j];
+        if (!FRAMING_VERBS.has(w2) && (VERBS[w2] || VERBS[stem(w2)])) {
+          return { base: VERBS[w2] ? w2 : stem(w2), index: j };
+        }
+      }
+      /* nothing real after — the framing itself is the signal */
+      return { base, index: i };
+    }
+    return { base, index: i };
   }
   return null;
 }
