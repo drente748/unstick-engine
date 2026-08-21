@@ -7,7 +7,7 @@ import type { DecisionTrace } from "./types";
    · In-memory ring buffer; never persisted, never transmitted.
    · Raw task text is never stored — titles are reduced to a
      32-bit hash before entering a trace entry.
-   · Schema: data/engine_data_schema.json documents the shape
+   · Schema: docs/engine-data-schema.json documents the shape
      a persistent/exported log would use.
 
    Reward components (§29 of the engine spec) are kept separate
