@@ -34,7 +34,8 @@ import type {
 
 /* ---------------- lexicons ---------------- */
 
-const VERBS: Record<string, string> = {
+/** Verb lexicon: base form -> noun phrase used in templates. Exported for the v5 NLU layer. */
+export const VERBS: Record<string, string> = {
   write: "writing", reply: "a reply", email: "an email", text: "a text", call: "a call",
   clean: "cleaning", tidy: "tidying", declutter: "decluttering", wash: "washing",
   study: "studying", read: "reading", revise: "revising", review: "reviewing", learn: "learning",
@@ -51,7 +52,8 @@ const VERBS: Record<string, string> = {
   sell: "a listing", list: "a listing", move: "moving", deliver: "delivering",
 };
 
-const STOPWORDS = new Set([
+/** Stopwords for matching only. Exported for the v5 NLU layer. */
+export const STOPWORDS = new Set([
   "the", "a", "an", "my", "our", "your", "his", "her", "their", "some", "for", "to", "on", "in",
   "of", "up", "about", "and", "or", "then", "with", "at", "from", "me", "us", "him", "them",
   "that", "this", "it", "its", "is", "are", "be", "do", "does", "need", "have", "has", "will",
@@ -60,13 +62,15 @@ const STOPWORDS = new Set([
   /* function words — dropped for matching, never for display */
 ]);
 
-const PLACES = [
+/** Known places. Exported for the v5 NLU layer. */
+export const PLACES = [
   "kitchen", "desk", "room", "bedroom", "bathroom", "office", "garage", "gym", "store", "bank",
   "library", "car", "floor", "studio", "lab", "basement", "attic", "balcony", "yard", "garden",
   "classroom", "campus", "clinic", "salon", "laundromat", "post office", "pharmacy", "shop",
 ];
 
-const TOOLS = [
+/** Known tools/apps. Exported for the v5 NLU layer. */
+export const TOOLS = [
   "email", "inbox", "emails", "excel", "word", "notion", "google", "docs", "doc", "document",
   "app", "website", "site", "form", "file", "folder", "browser", "phone", "laptop", "computer",
   "spreadsheet", "slides", "canvas", "figma", "vscode", "editor", "terminal", "calendar",
@@ -74,7 +78,8 @@ const TOOLS = [
   "piano", "sketchbook", "repo", "codebase", "printer", "sewing machine", "banking",
 ];
 
-const PEOPLE = [
+/** Relational/named people. Exported for the v5 NLU layer. */
+export const PEOPLE = [
   "mom", "dad", "mother", "father", "boss", "client", "clients", "dentist", "doctor", "teacher",
   "professor", "landlord", "recruiter", "friend", "colleague", "coworker", "mechanic", "vet",
   "agent", "accountant", "therapist", "coach", "team", "hr", "neighbor", "neighbour", "sister",
@@ -135,7 +140,8 @@ export const tokenize = (s: string): string[] =>
     .split(/\s+/)
     .filter(Boolean);
 
-const stem = (t: string): string => t.replace(/(ing|ed|es|s)$/, "");
+/** Light suffix stemmer. Exported for the v5 NLU layer. */
+export const stem = (t: string): string => t.replace(/(ing|ed|es|s)$/, "");
 
 function findFirst(words: string[], list: string[]): string | null {
   const joined = words.join(" ");

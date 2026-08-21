@@ -65,6 +65,7 @@ import { adaptFromFeedback as adaptLocal, barrierIntervention, buildRecoveryStra
 import { emptyMemory, nextStep, passesGuardrails, previewSteps, sizeFor } from "./selector";
 import type { Barrier, Draft, Level, Outcome, Profile, SessionRecord, StrategyId, TaskAnalysis } from "./types";
 import { getDecisionLog } from "./decisionLog";
+import { buildTaskGraph } from "./nlu/graph";
 import { computeProfile, emptyProfile } from "./profile";
 
 /** The nine named blockers offered in the state check. */
@@ -580,6 +581,66 @@ export function runEngineTests(): TestResults {
     const f = analyzeTask("study for my chemistry exam");
     ok(f.structureEvidence.length > 0, "parse/evidence-recorded", f.structureEvidence.join(","));
     ok(f.analysisConfidence.structure >= 0.6, "parse/confidence-from-margin", String(f.analysisConfidence.structure));
+  }
+
+  /* ---------- T-G · v5 semantic graph (Phase 1) ---------- */
+  {
+    /* Sarah case — the regression that motivated the graph */
+    const g = buildTaskGraph("Reply to Sarah's email about the project deadline");
+    ok(g.action === "reply", "graph/verb", String(g.action));
+    ok(g.subIntent === "reply", "graph/subintent", g.subIntent);
+    ok(g.primaryTarget !== null && g.primaryTarget.key === "email", "graph/target", g.primaryTarget?.key ?? "none");
+    ok(g.recipient !== null && g.recipient.key === "sarah", "graph/recipient", g.recipient?.key ?? "none");
+    ok(g.topic !== null && g.topic.key.includes("deadline"), "graph/topic", g.topic?.key ?? "none");
+    ok(
+      g.relations.some((r) => r.kind === "owned-by" && r.to === g.primaryTarget?.id),
+      "graph/owned-by-edge",
+      JSON.stringify(g.relations),
+    );
+    ok(g.relations.some((r) => r.kind === "about"), "graph/about-edge", JSON.stringify(g.relations));
+    ok(g.confidence >= 0.5, "graph/confidence-floor", String(g.confidence));
+
+    /* cleaning task — place-bound target */
+    const gc = buildTaskGraph("Clean the kitchen before dinner");
+    ok(gc.subIntent === "clean-space", "graph/clean-intent", gc.subIntent);
+    ok(gc.entities.some((e) => e.role === "place" && e.key === "kitchen"), "graph/place", JSON.stringify(gc.entities));
+    ok(gc.relations.some((r) => r.kind === "located-at"), "graph/located-at", JSON.stringify(gc.relations));
+
+    /* compound task — clauses preserved */
+    const gx = buildTaskGraph("Declutter the garage and sell old stuff online");
+    ok(gx.clauses.length === 2, "graph/clauses", JSON.stringify(gx.clauses));
+    ok(gx.clauses[0].toLowerCase().includes("garage"), "graph/clause-head", gx.clauses[0]);
+
+    /* noun phrase integrity — "project deadline" is ONE topic, not two */
+    ok(g.topic !== null && g.topic.text === "project deadline", "graph/np-integrity", g.topic?.text ?? "");
+
+    /* study task */
+    const gs = buildTaskGraph("Study for my chemistry exam");
+    ok(gs.subIntent === "study-material", "graph/study-intent", gs.subIntent);
+    ok(gs.entities.some((e) => e.role === "topic" && e.key.includes("exam")), "graph/study-topic", JSON.stringify(gs.entities));
+
+    /* pay bill */
+    const gp = buildTaskGraph("Pay the electricity bill before friday");
+    ok(gp.subIntent === "pay-bill", "graph/pay-intent", gp.subIntent);
+
+    /* fix bug */
+    const gf = buildTaskGraph("Fix the bug in the checkout flow");
+    ok(gf.subIntent === "fix-broken", "graph/fix-intent", gf.subIntent);
+    ok(gf.primaryTarget !== null, "graph/fix-target", String(gf.primaryTarget?.text));
+
+    /* evidence recorded on every entity */
+    ok(
+      g.entities.every((e) => e.evidence.length > 0),
+      "graph/entity-evidence",
+      JSON.stringify(g.entities.map((e) => e.evidence)),
+    );
+
+    /* determinism: same input -> identical graph */
+    const g2 = buildTaskGraph("Reply to Sarah's email about the project deadline");
+    ok(JSON.stringify(g) === JSON.stringify(g2), "graph/deterministic", "graphs differ");
+
+    /* immutability contract: graph carries no belief fields */
+    ok(!("beliefs" in g), "graph/no-beliefs", "graph must stay belief-free");
   }
 
   /* ---------- global invariants over everything emitted above ---------- */
