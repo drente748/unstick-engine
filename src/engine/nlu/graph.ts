@@ -77,6 +77,20 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
   const toolE = byRole("tool")[0];
   const commIntents: SubIntent[] = ["reply", "initiate-contact", "follow-up", "cancel-plan", "negotiate"];
 
+  /* ---- dedupe: a tool identical to the target is the same entity
+     ("reply to John's email" — email IS both medium and artifact).
+     Keep the target; drop the redundant tool. ---- */
+  const toolIdx = entities.findIndex((e) => e.role === "tool");
+  if (toolIdx >= 0 && target && entities[toolIdx].key === target.key) {
+    entities.splice(toolIdx, 1);
+    /* re-number ids so they stay contiguous */
+    entities.forEach((e, i) => {
+      e.id = `e${i + 1}`;
+    });
+    const t = entities.find((e) => e.role === "target");
+    if (t) target = t;
+  }
+
   /* directed-to / owned-by: person <-> target */
   if (target && personE) {
     if (personE.evidence.startsWith("possessive")) {
