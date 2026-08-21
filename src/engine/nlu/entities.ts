@@ -24,6 +24,17 @@ const TOPIC_MARKERS = new Set(["about", "regarding", "concerning", "for"]);
 /** Possessive marker: "Sarah's" -> owner Sarah. */
 const POSSESSIVE = /^([a-z]+)'s?\b/i;
 
+/** Day/month names — capitalized but NEVER people. */
+const TEMPORAL_WORDS = new Set([
+  "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+  "january", "february", "march", "april", "may", "june", "july",
+  "august", "september", "october", "november", "december",
+  "today", "tomorrow", "tonight", "weekend", "noon", "midnight",
+]);
+
+/** Temporal markers that START a time phrase ("before Friday"). */
+const TIME_MARKERS = new Set(["before", "by", "until", "on"]);
+
 /** Capitalized word(s) at a position — likely a proper name. */
 function isProperName(word: string): boolean {
   return /^[A-Z][a-z]+$/.test(word);
@@ -73,7 +84,11 @@ export function extractEntities(clauseText: string): TaskEntity[] {
     /* a capitalized non-lexicon word mid-task is likely a name
        ("email Sarah about...") — record as person with lower confidence,
        unless it is sentence-initial (could be anything) */
-    if (isProperName(orig) && i > 0 && !STOPWORDS.has(w) && !TOOLS.includes(w) && !PLACES.includes(w)) {
+    if (
+      isProperName(orig) && i > 0 && !STOPWORDS.has(w) &&
+      !TOOLS.includes(w) && !PLACES.includes(w) &&
+      !TEMPORAL_WORDS.has(w) /* days/months are times, never people */
+    ) {
       push({ role: "person", text: orig, key: w, confidence: 0.7, evidence: `proper-name:${orig}` });
     }
   }
@@ -97,9 +112,37 @@ export function extractEntities(clauseText: string): TaskEntity[] {
     }
   }
 
+  /* ---- time: "before Friday", "by monday", "until june" ----
+     Extracted BEFORE topic so topic extraction can stop at the
+     temporal boundary. */
+  let timeBoundary = words.length; /* index where the time phrase starts */
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const isMarker = TIME_MARKERS.has(w);
+    const isTemporal = TEMPORAL_WORDS.has(w);
+    if (!isMarker && !isTemporal) continue;
+    if (isMarker) {
+      const nxt = words[i + 1] ?? "";
+      if (!TEMPORAL_WORDS.has(nxt)) continue; /* "on the desk" is not time */
+      push({
+        role: "time",
+        text: `${capitalize(w)} ${capitalize(nxt)}`,
+        key: `${w} ${nxt}`,
+        confidence: 0.85,
+        evidence: `time-marker:${w}`,
+      });
+    } else {
+      push({ role: "time", text: capitalize(w), key: w, confidence: 0.8, evidence: `temporal-word:${w}` });
+    }
+    timeBoundary = Math.min(timeBoundary, i);
+    break;
+  }
+
   /* ---- topic: after "about/regarding/concerning/for" ----
      "for" counts ONLY as purpose marker when followed by content
-     ("for my chemistry exam"), not as plain preposition. */
+     ("for my chemistry exam"), not as plain preposition.
+     Topic collection STOPS at the temporal boundary so
+     "about the proposal before Friday" -> topic="proposal". */
   for (let i = 0; i < words.length; i++) {
     const marker = words[i];
     if (!TOPIC_MARKERS.has(marker)) continue;
@@ -112,15 +155,16 @@ export function extractEntities(clauseText: string): TaskEntity[] {
     }
     const topicWords: string[] = [];
     const origTokens = title.split(/\s+/);
-    for (let j = i + 1; j < words.length && topicWords.length < 4; j++) {
+    for (let j = i + 1; j < words.length && j < timeBoundary && topicWords.length < 4; j++) {
       if (STOPWORDS.has(words[j])) continue;
+      if (TIME_MARKERS.has(words[j]) || TEMPORAL_WORDS.has(words[j])) break;
       topicWords.push(origTokens[j] ?? words[j]);
     }
     if (topicWords.length > 0) {
       push({
         role: "topic",
         text: topicWords.join(" "),
-        key: words.slice(i + 1).filter((w: string) => !STOPWORDS.has(w)).join(" "),
+        key: words.slice(i + 1, Math.max(i + 1, timeBoundary)).filter((w: string) => !STOPWORDS.has(w)).join(" "),
         confidence: 0.9,
         evidence: `topic-marker:${marker}`,
       });

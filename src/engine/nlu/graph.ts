@@ -45,7 +45,7 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
 
   /* ---- ensure a target exists: derive from object phrase when the
      parse found one but entity extraction missed it ---- */
-  let target = entities.find((e) => e.role === "target");
+  let target: TaskEntity | null = entities.find((e) => e.role === "target") ?? null;
   if (!target && analysis.object && analysis.object.toLowerCase() !== title.toLowerCase()) {
     const key = analysis.object.toLowerCase();
     entities.push({
@@ -71,25 +71,27 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
     relations.push({ from: from.id, kind, to: to.id, confidence: conf, evidence: ev });
   };
 
+  const commIntents: SubIntent[] = ["reply", "initiate-contact", "follow-up", "cancel-plan", "negotiate"];
+
+  /* ---- dedupe FIRST (before any role lookups): a tool identical to
+     the target is the same entity ("reply to John's email" — email IS
+     both medium and artifact). Keep the target; drop the redundant
+     tool and re-number ids. ---- */
+  const toolIdx = entities.findIndex((e) => e.role === "tool");
+  if (toolIdx >= 0 && target && entities[toolIdx].key === target.key) {
+    entities.splice(toolIdx, 1);
+    entities.forEach((e, i) => {
+      e.id = `e${i + 1}`;
+    });
+    target = entities.find((e) => e.role === "target") ?? null;
+  }
+
+  /* role lookups AFTER dedupe — stale references are how a time
+     entity once got linked as a tool ("via -> Before Friday"). */
   const personE = byRole("person")[0];
   const topicE = byRole("topic")[0];
   const placeE = byRole("place")[0];
   const toolE = byRole("tool")[0];
-  const commIntents: SubIntent[] = ["reply", "initiate-contact", "follow-up", "cancel-plan", "negotiate"];
-
-  /* ---- dedupe: a tool identical to the target is the same entity
-     ("reply to John's email" — email IS both medium and artifact).
-     Keep the target; drop the redundant tool. ---- */
-  const toolIdx = entities.findIndex((e) => e.role === "tool");
-  if (toolIdx >= 0 && target && entities[toolIdx].key === target.key) {
-    entities.splice(toolIdx, 1);
-    /* re-number ids so they stay contiguous */
-    entities.forEach((e, i) => {
-      e.id = `e${i + 1}`;
-    });
-    const t = entities.find((e) => e.role === "target");
-    if (t) target = t;
-  }
 
   /* directed-to / owned-by: person <-> target */
   if (target && personE) {
@@ -105,6 +107,9 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
   if (target && placeE) link(target, "located-at", placeE, 0.8, "place+target-present");
   /* via: target -> tool */
   if (toolE && target) link(target, "via", toolE, 0.85, toolE.evidence);
+  /* due-by: target -> time ("before Friday") */
+  const timeE = byRole("time")[0];
+  if (target && timeE) link(target, "due-by", timeE, 0.85, timeE.evidence);
 
   /* ---- graph-level confidence: weakest mandatory slot wins ---- */
   const mandatoryConfidences = [

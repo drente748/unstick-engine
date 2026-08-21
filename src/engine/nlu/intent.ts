@@ -144,10 +144,15 @@ export function classifySubIntent(
   }
   if (
     (verb === "reply" || verb === "respond" || verb === "answer") ||
-    (hasTargetMsg && ["email", "text", "call", "send", "write"].includes(verb ?? ""))
+    (hasTargetMsg && ["text", "call", "write"].includes(verb ?? ""))
   ) {
     ev.push(verb ? `verb:${verb}` : "target:message-noun");
     return { subIntent: "reply", evidence: ev };
+  }
+  if (verb === "send" || verb === "email") {
+    /* sending/composing a NEW message — not replying to one */
+    ev.push(`verb:${verb} -> new outbound`);
+    return { subIntent: "initiate-contact", evidence: ev };
   }
   if (hasTargetMsg && roles.has("person")) {
     ev.push("target:message + person");
