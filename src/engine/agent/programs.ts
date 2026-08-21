@@ -58,6 +58,17 @@ export const PROGRAMS: Record<string, Program> = {
       { text: "Next session is a RESUMPTION, not a start. That's the easier kind.", size: 0 },
     ],
   },
+  /* Chronic freeze: nervous-system first, task second. */
+  "freeze-thaw": {
+    id: "freeze-thaw",
+    name: "Freeze thaw",
+    when: "overwhelm is high AND nothing has moved for a long stretch — regulate first, act second",
+    steps: [
+      { text: "Name 5 things you can see right now. Out loud or in your head.", size: -1 },
+      { text: "Drink some water and roll your shoulders once.", size: -1 },
+      { text: "Look at the task's corner — not the whole task, just its edge.", size: -1 },
+    ],
+  },
 };
 
 /** Look up a program; null when the id is unknown (never guess). */

@@ -16,7 +16,7 @@
 
 import type { Belief, TaskGraph } from "../types-v5";
 import type { OutcomeFeedback } from "./beliefUpdate";
-import { techniquesForBeliefs, type Technique } from "../kb/adhd";
+import { techniquesForBeliefs, TASK_AFFINITY, type Technique } from "../kb/adhd";
 
 export type PersonaId = "direct" | "gentle" | "socratic" | "structured" | "momentum";
 
@@ -103,6 +103,8 @@ export function decide(
         case "overwhelm":
           sizeDelta = -1;
           persona = "gentle";
+          /* deep overwhelm + no movement -> nervous-system-first program */
+          if (barrier.confidence >= 0.6) program = "freeze-thaw";
           break;
         case "unclear-task":
           askInsteadOfAct = graph.primaryTarget == null || graph.primaryTarget.entityType === "unclassified";
@@ -142,10 +144,26 @@ export function decide(
     why.push("multi-clause -> structured persona");
   }
 
-  /* ---- technique rotation from the knowledge base ---- */
+  /* ---- technique selection from the knowledge base ----
+     Three scoring dimensions:
+       1. barrier match (2 per hit) — what's blocking them
+       2. task affinity (3 per hit) — what kind of work it is
+       3. persona affinity (+1) + rotation penalty (-3) */
   const pool = techniquesForBeliefs(beliefs);
-  const rotated = pool.filter((t) => t.id !== lastTechniqueId);
-  const technique = (rotated.length > 0 ? rotated : pool)[0] ?? null;
+  const affinity = TASK_AFFINITY[graph.subIntent] ?? [];
+  let technique: Technique | null = null;
+  if (pool.length > 0) {
+    const scored = pool.map((t) => ({
+      t,
+      score:
+        t.bestForBarriers.filter((v) => v === barrier?.value).length * 2 +
+        (affinity.includes(t.id) ? 3 : 0) +
+        (t.personas.includes(persona) ? 1 : 0) +
+        (t.id === lastTechniqueId ? -3 : 0),
+    }));
+    scored.sort((a, b) => b.score - a.score);
+    technique = scored[0].t;
+  }
   if (technique) why.push(`technique:${technique.id} (${technique.source})`);
 
   return { sizeDelta, askInsteadOfAct, persona, program, technique, rationale: why };

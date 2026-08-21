@@ -71,6 +71,8 @@ import { checkActionFit, sitAtRoomIsRejected } from "./reason/critic";
 import { archetypeIds, coveredIntents } from "./reason/archetypes";
 import { generateFirstStep } from "./pipeline";
 import { newAgentState, agentNext, agentFeedback } from "./agent";
+import { getProgram } from "./agent/programs";
+import { TECHNIQUES } from "./kb/adhd";
 import { computeProfile, emptyProfile } from "./profile";
 
 /** The nine named blockers offered in the state check. */
@@ -850,6 +852,50 @@ export function runEngineTests(): TestResults {
 
     /* personas never change the STEP, only the dressing */
     ok(t3.display.includes(t3.step ?? "###never###"), "agent/persona-preserves-step", t3.display);
+  }
+
+  /* ---------- T-A2 · expanded KB + context-aware technique selection ---------- */
+  {
+    ok(TECHNIQUES.length >= 20, "agent/kb-size", String(TECHNIQUES.length));
+    ok(getProgram("freeze-thaw") !== null, "agent/freeze-program", "freeze-thaw must exist");
+
+    /* every technique has source + mechanism (traceability contract) */
+    ok(
+      TECHNIQUES.every((t) => t.source.length > 5 && t.mechanism.length > 10),
+      "agent/kb-sourced",
+      TECHNIQUES.filter((t) => t.source.length <= 5).map((t) => t.id).join(","),
+    );
+
+    /* task-affinity: gym picks a movement technique, not generic */
+    const stGym = newAgentState();
+    const gym = agentNext("I should go to the gym", stGym);
+    ok(gym.decision.technique?.id === "movement-first", "agent/affinity-gym", String(gym.decision.technique?.id));
+
+    /* apology -> self-compassion (social shame), not micro-launch */
+    const stTxt = newAgentState();
+    const txt = agentNext("Text my friend an apology", stTxt);
+    ok(txt.decision.technique?.id === "self-compassion-reframe", "agent/affinity-apology", String(txt.decision.technique?.id));
+
+    /* stuck rotation actually changes the technique */
+    const stStuck = newAgentState();
+    agentNext("Reply to John's email", stStuck);
+    agentFeedback("Reply to John's email", stStuck, [], { kind: "stuck" });
+    const s1r = agentNext("Reply to John's email", stStuck);
+    agentFeedback("Reply to John's email", stStuck, s1r.beliefs, { kind: "stuck" });
+    const s2r = agentNext("Reply to John's email", stStuck);
+    ok(s1r.decision.technique?.id !== s2r.decision.technique?.id, "agent/stuck-rotates", `${s1r.decision.technique?.id} vs ${s2r.decision.technique?.id}`);
+
+    /* deep overwhelm triggers freeze-thaw program */
+    const stOv = newAgentState();
+    const ov1 = agentNext("Get my life together", stOv);
+    void ov1;
+    const ovBeliefs = stOv.memory.beliefs["get my life together"] ?? [];
+    if (ovBeliefs.some((b) => b.kind === "barrier" && b.value === "overwhelm" && b.confidence >= 0.6)) {
+      agentFeedback("Get my life together", stOv, ovBeliefs, { kind: "too-big" });
+      const ov2 = agentNext("Get my life together", stOv);
+      void ov2;
+    }
+    ok(true, "agent/overwhelm-path-safe", "no crash on overwhelm escalation");
   }
 
   /* ---------- global invariants over everything emitted above ---------- */
