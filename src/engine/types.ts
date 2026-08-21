@@ -491,6 +491,8 @@ export interface Draft {
   memory: EngineMemory;
   /** Latest decision metadata (internal; not required by screens). */
   decision?: DecisionMeta | null;
+  /** v5 agent: last turn's beliefs (for feedback revision). */
+  agentBeliefs?: import("./types-v5").Belief[] | null;
 }
 
 export interface Settings {

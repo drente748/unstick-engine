@@ -39,6 +39,7 @@ import {
   runEngineSelfTest,
 } from "../engine/localEngine";
 import { DEFAULT_SETTINGS, clearPersisted, loadPersisted, savePersisted, uid } from "../lib/persist";
+import { turnFor, sendFeedback } from "./agentStore";
 
 if (import.meta.env.DEV) runEngineSelfTest();
 
@@ -193,15 +194,23 @@ function reducer(state: State, a: Action): State {
 
     case "difficulty": {
       if (!state.draft) return state;
+
+      /* ---- v5 AGENT TURN: the agent produces the step + persona.
+         Its validated step becomes draft.override so every existing
+         screen shows the agent's work with zero UI changes. ---- */
+      const agentTurn = turnFor(state.draft.title, a.value);
+      const agentNote = `agent · ${agentTurn.persona.toLowerCase()} voice${agentTurn.techniqueId ? ` · ${agentTurn.techniqueId.replace(/-/g, " ")}` : ""}`;
+
       if (a.value === "easy") {
         const plan = planFirstStep(state.draft.analysis, { profile, durationSec: 10 });
         const draft: Draft = {
           ...state.draft,
           level: plan.size,
-          override: plan.action,
+          override: agentTurn.step ?? plan.action,
           strategy: plan.strategy,
           memory: plan.memory,
-          note: "easy day — go straight in",
+          note: agentNote,
+          agentBeliefs: null, /* filled by agentNext inside turnFor */
         };
         return { ...state, draft, screen: { id: "quick" } };
       }
@@ -210,10 +219,10 @@ function reducer(state: State, a: Action): State {
         const draft: Draft = {
           ...state.draft,
           level: plan.size,
-          override: plan.action,
+          override: agentTurn.step ?? plan.action,
           strategy: plan.strategy,
           memory: plan.memory,
-          note: "micro start",
+          note: agentNote,
         };
         return { ...state, draft, screen: { id: "micro" } };
       }
@@ -224,9 +233,10 @@ function reducer(state: State, a: Action): State {
       const draft: Draft = {
         ...state.draft,
         level: plan.size,
-        override: plan.action,
+        override: agentTurn.step ?? plan.action,
         strategy: plan.strategy,
         memory: plan.memory,
+        note: agentNote,
       };
       return { ...state, draft, screen: { id: "shrinker" } };
     }
@@ -380,6 +390,9 @@ function reducer(state: State, a: Action): State {
     case "feedback": {
       if (!state.draft) return state;
       const res = adaptFromFeedback(state.draft, profile, a.kind);
+      /* v5 agent learns from the SAME outcome — beliefs update for
+         the next turn even when v4 picks the step text */
+      const revisedBeliefs = sendFeedback(state.draft.title, state.draft.agentBeliefs ?? undefined, a.kind);
       const sessions =
         a.kind === "worked"
           ? state.sessions.map((s) => (s.id === state.draft?.sessionId ? { ...s, steps: s.steps + 1 } : s))
@@ -396,6 +409,7 @@ function reducer(state: State, a: Action): State {
           feedbacks: res.feedbacks,
           lastFeedback: res.lastFeedback,
           note: res.note,
+          agentBeliefs: revisedBeliefs,
         },
       };
     }
