@@ -69,6 +69,8 @@ export interface TaskEntity {
   confidence: number;
   /** How it was found — always recorded, never guessed silently. */
   evidence: string;
+  /** Which clause (0-based) this entity came from. Head clause = 0. */
+  clause?: number;
 }
 
 /* ---------------- the task graph (nodes + typed relation edges) ---------------- */
@@ -121,6 +123,8 @@ export interface TaskGraph {
   topic: TaskEntity | null;
   /** Multi-part clauses (each analyzed on its own). */
   clauses: string[];
+  /** Verbs of secondary clauses, in order ("organize" in clause 2). */
+  secondaryVerbs: string[];
   /** Parse confidence for the whole graph (0..1). */
   confidence: number;
   /** Every signal used, for debugging and eval. */

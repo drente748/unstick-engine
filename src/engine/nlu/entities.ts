@@ -64,6 +64,9 @@ export function extractEntities(clauseText: string): TaskEntity[] {
     drafts.push(d);
   };
 
+  /* ---- time FIRST: locate the temporal boundary so the object
+     phrase can be cut before it ("the garage before Saturday" ->
+     object core is "the garage"). ---- */
   /* ---- recipient / person: possessive + known people + proper names ---- */
   let owner: string | null = null;
   for (let i = 0; i < words.length; i++) {
@@ -185,6 +188,35 @@ export function extractEntities(clauseText: string): TaskEntity[] {
   const msgNoun = words.find((w, idx) => MESSAGE_NOUNS.has(w) && idx > verbIdx);
   if (msgNoun) {
     push({ role: "target", text: msgNoun, key: msgNoun, confidence: 0.9, evidence: `message-noun:${msgNoun}` });
+  }
+
+  /* ---- target core fallback: the noun phrase right after the verb,
+     CUT at every boundary (time / topic-marker / place already has
+     its own entity). "Clean the garage before Saturday" ->
+     target="the garage". Never spans past the clause. ---- */
+  if (!drafts.some((d) => d.role === "target")) {
+    const coreWords: string[] = [];
+    for (let j = verbIdx + 1; j < words.length && j < timeBoundary && coreWords.length < 3; j++) {
+      const w = words[j];
+      if (STOPWORDS.has(w) && coreWords.length > 0) break; /* stop at "before/and" connectors */
+      if (TOPIC_MARKERS.has(w) || TIME_MARKERS.has(w)) break;
+      if (TEMPORAL_WORDS.has(w)) break;
+      /* skip pure function words at the start (to/the/my) */
+      if (STOPWORDS.has(w) && coreWords.length === 0) continue;
+      const origTokens = title.split(/\s+/);
+      coreWords.push(origTokens[j] ?? w);
+      /* a known place/tool IS the whole target by itself */
+      if (PLACES.includes(w) || TOOLS.includes(w)) break;
+    }
+    if (coreWords.length > 0) {
+      push({
+        role: "target",
+        text: coreWords.join(" "),
+        key: tokenize(coreWords.join(" ")).join(" "),
+        confidence: 0.75,
+        evidence: "clause-object-core",
+      });
+    }
   }
 
   return drafts.map((d, i) => ({

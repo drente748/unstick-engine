@@ -46,7 +46,7 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
   /* ---- ensure a target exists: derive from object phrase when the
      parse found one but entity extraction missed it ---- */
   let target: TaskEntity | null = entities.find((e) => e.role === "target") ?? null;
-  if (!target && analysis.object && analysis.object.toLowerCase() !== title.toLowerCase()) {
+  if (!target && analysis.object && analysis.object.toLowerCase() !== title.toLowerCase() && clauses.length === 1) {
     const key = analysis.object.toLowerCase();
     entities.push({
       id: `e${entities.length + 1}`,
@@ -57,6 +57,18 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
       evidence: "analysis-object-fallback",
     });
     target = entities[entities.length - 1];
+  }
+
+  /* ---- entities from REMAINING clauses (multi-part tasks) — tagged
+     with their clause index, kept OUT of the head relations ---- */
+  const secondaryVerbs: string[] = [];
+  const secondary: TaskEntity[] = [];
+  for (let ci = 1; ci < clauses.length; ci++) {
+    const cText = clauses[ci].text;
+    const cVerb = findVerbBase(cText);
+    if (cVerb) secondaryVerbs.push(cVerb.base);
+    const cEnts = extractEntities(cText).map((e) => ({ ...e, clause: ci }));
+    secondary.push(...cEnts);
   }
 
   /* ---- relation edges (typed, evidence-backed) ----
@@ -101,10 +113,15 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
       link(target, "directed-to", personE, 0.85, `comm-intent:${intent.subIntent}`);
     }
   }
-  /* about: target -> topic */
-  if (target && topicE) link(target, "about", topicE, 0.9, topicE.evidence);
-  /* located-at: target -> place */
-  if (target && placeE) link(target, "located-at", placeE, 0.8, "place+target-present");
+  /* about: target -> topic (skip clause-verb metadata entities) */
+  if (target && topicE && !topicE.key.startsWith("clause-verb:")) {
+    link(target, "about", topicE, 0.9, topicE.evidence);
+  }
+  /* located-at: target -> place — but NOT when the place IS the target
+     ("clean the garage": garage is the thing acted on, not a venue) */
+  if (target && placeE && target.key !== placeE.key) {
+    link(target, "located-at", placeE, 0.8, "place+target-present");
+  }
   /* via: target -> tool */
   if (toolE && target) link(target, "via", toolE, 0.85, toolE.evidence);
   /* due-by: target -> time ("before Friday") */
@@ -119,16 +136,21 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
   ];
   const confidence = Math.min(...mandatoryConfidences);
 
+  /* ---- merge secondary-clause entities with contiguous ids ---- */
+  const idOffset = entities.length;
+  const mergedSecondary = secondary.map((s, i) => ({ ...s, id: `e${idOffset + i + 1}` }));
+
   return {
     action,
     subIntent: intent.subIntent,
     structure: analysis.structure,
-    entities,
+    entities: [...entities, ...mergedSecondary],
     relations,
     primaryTarget: target ?? null,
     recipient: byRole("person")[0] ?? null,
     topic: topicE ?? null,
     clauses: clauses.map((c) => c.text),
+    secondaryVerbs,
     confidence,
     evidence: [...intent.evidence, ...entities.map((e) => e.evidence)],
   };

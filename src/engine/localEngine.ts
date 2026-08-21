@@ -604,7 +604,10 @@ export function runEngineTests(): TestResults {
     const gc = buildTaskGraph("Clean the kitchen before dinner");
     ok(gc.subIntent === "clean-space", "graph/clean-intent", gc.subIntent);
     ok(gc.entities.some((e) => e.role === "place" && e.key === "kitchen"), "graph/place", JSON.stringify(gc.entities));
-    ok(gc.relations.some((r) => r.kind === "located-at"), "graph/located-at", JSON.stringify(gc.relations));
+    /* the place IS the target here — no located-at edge (that would
+       mean the kitchen is a venue where something else happens) */
+    ok(gc.primaryTarget !== null && gc.primaryTarget.key === "kitchen", "graph/clean-target", gc.primaryTarget?.key ?? "none");
+    ok(gc.relations.every((r) => r.kind !== "located-at"), "graph/no-self-located-at", JSON.stringify(gc.relations));
 
     /* compound task — clauses preserved */
     const gx = buildTaskGraph("Declutter the garage and sell old stuff online");
