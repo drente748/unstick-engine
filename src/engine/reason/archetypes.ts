@@ -66,7 +66,7 @@ const FIXING: Archetype = {
   subIntents: ["fix-broken"],
   features: ["target:digital-system", "action:fix"],
   playbook: [
-    { via: "target", template: "Open {target} and make the problem happen once.", size: 1 },
+    { via: "target", template: "Make the problem with {target} happen once — just reproduce it.", size: 1 },
     { via: "target", template: "Write down the exact error or wrong behavior of {target}.", size: 2 },
     { via: "target", template: "Try one obvious fix on {target}. Reverting is allowed.", size: 3 },
   ],

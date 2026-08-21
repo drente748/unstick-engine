@@ -69,6 +69,7 @@ import { buildTaskGraph } from "./nlu/graph";
 import { inferFromGraph } from "./reason/infer";
 import { checkActionFit, sitAtRoomIsRejected } from "./reason/critic";
 import { archetypeIds, coveredIntents } from "./reason/archetypes";
+import { generateFirstStep } from "./pipeline";
 import { computeProfile, emptyProfile } from "./profile";
 
 /** The nine named blockers offered in the state check. */
@@ -706,6 +707,66 @@ export function runEngineTests(): TestResults {
     /* archetype coverage sanity: five families registered */
     ok(archetypeIds().length === 5, "reason/five-archetypes", archetypeIds().join(","));
     ok(coveredIntents().includes("fix-broken"), "reason/fix-covered", "fix-broken must be covered");
+  }
+
+  /* ---------- T-P3 · Phase 3 generator + cascade ---------- */
+  {
+    /* THE acceptance case: one tiny step, not a plan dump */
+    const r1 = generateFirstStep("Clean my room");
+    ok(r1 !== null, "p3/room-step", "must produce a step");
+    ok(r1?.action === "Enter room and look at one corner only.", "p3/room-exact", r1?.action ?? "");
+    ok(r1?.fidelity === "entry-legitimate", "p3/room-doorway", String(r1?.fidelity));
+    ok((r1?.size ?? 9) <= 2, "p3/room-tiny", String(r1?.size));
+
+    /* communication: small, artifact-anchored */
+    const r2 = generateFirstStep("Reply to Sarah's email about the deadline");
+    ok(r2 !== null && r2.action.includes("email"), "p3/comm-target", r2?.action ?? "");
+    ok(/only|first/i.test(r2?.action ?? ""), "p3/comm-bounded", r2?.action ?? "");
+
+    /* studying */
+    const r3 = generateFirstStep("Study chapter 5 of the biology textbook");
+    ok(r3 !== null && r3.action.includes("chapter 5"), "p3/study-target", r3?.action ?? "");
+
+    /* fixing: no broken grammar ("Open bug" must never appear) */
+    const r4 = generateFirstStep("Fix the bug in the checkout flow");
+    ok(!/^open bug/i.test(r4?.action ?? ""), "p3/fix-grammar", r4?.action ?? "");
+    ok(r4 !== null, "p3/fix-step", r4?.action ?? "");
+
+    /* organizing compound: cascade rejects bad candidates, picks valid */
+    const r5 = generateFirstStep("Organize the closet and donate old clothes");
+    ok(r5 !== null && r5.action.includes("closet"), "p3/org-target", r5?.action ?? "");
+    ok(/sort|organiz/i.test(r5?.action ?? ""), "p3/org-action", r5?.action ?? "");
+
+    /* ambiguous: Socratic clarification, never fabrication */
+    const r6 = generateFirstStep("Deal with that thing somehow");
+    ok(r6 !== null, "p3/ambig-step", "must ask, not invent");
+    ok(/say|what/i.test(r6?.action ?? ""), "p3/ambig-socratic", r6?.action ?? "");
+
+    /* uncovered intent: graceful fallback using recipient */
+    const r7 = generateFirstStep("Book a dentist appointment for next Tuesday");
+    ok(r7 !== null && r7.action.includes("the dentist"), "p3/sched-recipient", r7?.action ?? "");
+
+    /* determinism: same input -> same step */
+    const r1b = generateFirstStep("Clean my room");
+    ok(r1?.action === r1b?.action, "p3/deterministic", `${r1?.action} vs ${r1b?.action}`);
+
+    /* dedupe: second call with shown surface -> different step or null */
+    const r1c = generateFirstStep("Clean my room", [r1?.action ?? ""]);
+    ok(r1c === null || r1c.action !== r1?.action, "p3/dedupe-survives", r1c?.action ?? "null");
+
+    /* every produced step passes guardrails (no banned phrases) */
+    const all = [r1, r2, r3, r4, r5, r6, r7].filter(Boolean).map((r) => r!.action);
+    ok(all.every((s) => passesGuardrails(s)), "p3/guardrails", all.find((s) => !passesGuardrails(s)) ?? "");
+
+    /* trace evidence present on every result */
+    for (const r of [r1, r2, r3, r4, r5, r6, r7]) {
+      if (!r) continue;
+      if (!(r.trace.subIntent.length > 0 && r.trace.candidatesConsidered > 0)) {
+        ok(false, "p3/trace-evidence", JSON.stringify(r.trace));
+        break;
+      }
+    }
+    ok(true, "p3/trace-evidence", "all traces carry subIntent + candidate count");
   }
 
   /* ---------- global invariants over everything emitted above ---------- */
