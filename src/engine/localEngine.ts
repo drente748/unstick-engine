@@ -66,6 +66,9 @@ import { emptyMemory, nextStep, passesGuardrails, previewSteps, sizeFor } from "
 import type { Barrier, Draft, Level, Outcome, Profile, SessionRecord, StrategyId, TaskAnalysis } from "./types";
 import { getDecisionLog } from "./decisionLog";
 import { buildTaskGraph } from "./nlu/graph";
+import { inferFromGraph } from "./reason/infer";
+import { checkActionFit, sitAtRoomIsRejected } from "./reason/critic";
+import { archetypeIds, coveredIntents } from "./reason/archetypes";
 import { computeProfile, emptyProfile } from "./profile";
 
 /** The nine named blockers offered in the state check. */
@@ -644,6 +647,65 @@ export function runEngineTests(): TestResults {
 
     /* immutability contract: graph carries no belief fields */
     ok(!("beliefs" in g), "graph/no-beliefs", "graph must stay belief-free");
+  }
+
+  /* ---------- T-R · v5 reasoning layer (Phase 2) ---------- */
+  {
+    /* THE acceptance case: room must be cleanable-space, not desk */
+    const gr = buildTaskGraph("Clean my room");
+    const inf = inferFromGraph(gr);
+    const roomE = inf.graph.entities.find((e) => e.key === "room");
+    ok(roomE != null, "reason/room-exists", JSON.stringify(inf.graph.entities));
+    ok(roomE?.entityType === "cleanable-space", "reason/room-nature", String(roomE?.entityType));
+
+    /* desk is NOT a cleanable-space — the distinction Test 7 demanded */
+    const gd = buildTaskGraph("Clean my desk");
+    inferFromGraph(gd);
+    const deskE = gd.entities.find((e) => e.key === "desk");
+    ok(deskE?.entityType === "work-surface", "reason/desk-nature", String(deskE?.entityType));
+
+    /* email is a communication artifact */
+    const ge = buildTaskGraph("Reply to Sarah's email about the deadline");
+    inferFromGraph(ge);
+    const emailE = ge.entities.find((e) => e.key === "email" && e.role === "target");
+    ok(emailE?.entityType === "communication-artifact", "reason/email-nature", String(emailE?.entityType));
+
+    /* beliefs: every one has evidence + confidence in range */
+    ok(inf.beliefs.length > 0, "reason/beliefs-present", String(inf.beliefs.length));
+    ok(
+      inf.beliefs.every((b) => b.evidence.length > 0 && b.confidence > 0 && b.confidence <= 1),
+      "reason/belief-evidence",
+      JSON.stringify(inf.beliefs),
+    );
+    /* barrier beliefs are hypotheses (have evidence), never bare facts */
+    const barriers = inf.beliefs.filter((b) => b.kind === "barrier");
+    ok(barriers.every((b) => b.evidence.length >= 1), "reason/barrier-hypotheses", JSON.stringify(barriers));
+
+    /* archetype matched for cleaning */
+    ok(inf.archetype !== null, "reason/archetype-found", String(inf.archetype?.archetype.id));
+    ok(inf.archetype?.archetype.id === "cleaning", "reason/cleaning-archetype", String(inf.archetype?.archetype.id));
+    ok((inf.archetype?.score ?? 0) >= 2, "reason/archetype-score", String(inf.archetype?.score));
+
+    /* communication graph matches communication archetype */
+    const infE = inferFromGraph(ge);
+    ok(infE.archetype?.archetype.id === "communication", "reason/comm-archetype", String(infE.archetype?.archetype.id));
+
+    /* critic: sit-at on cleanable-space REJECTS (Test 7 pinned) */
+    ok(sitAtRoomIsRejected(), "reason/sit-at-room-rejected", "must be structurally impossible");
+    /* critic: clean on cleanable-space passes */
+    const vOk = checkActionFit("clean", "cleanable-space");
+    ok(vOk.ok, "reason/clean-on-space-ok", vOk.reason);
+    /* critic: read on cleanable-space rejects */
+    const vBad = checkActionFit("read", "cleanable-space");
+    ok(!vBad.ok && vBad.gate === "semantic", "reason/read-on-space-rejected", vBad.reason);
+
+    /* determinism of the whole reasoning pass */
+    const inf2 = inferFromGraph(buildTaskGraph("Clean my room"));
+    ok(JSON.stringify(inf.beliefs) === JSON.stringify(inf2.beliefs), "reason/deterministic", "beliefs differ");
+
+    /* archetype coverage sanity: five families registered */
+    ok(archetypeIds().length === 5, "reason/five-archetypes", archetypeIds().join(","));
+    ok(coveredIntents().includes("fix-broken"), "reason/fix-covered", "fix-broken must be covered");
   }
 
   /* ---------- global invariants over everything emitted above ---------- */

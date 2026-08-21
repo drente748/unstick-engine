@@ -57,6 +57,54 @@ export type EntityRole =
   | "person"      /* a named or relational person (mom, boss, Alex) */
   | "time";       /* a stated time/deadline */
 
+/* ---------------- entity nature (semantic type) ---------------- */
+
+/**
+ * The SEMANTIC NATURE of an entity — what kind of thing it is and
+ * therefore which actions are physically/semantically valid on it.
+ * This is what prevents "Sit down at the room": sitting requires a
+ * work-surface; a cleanable-space takes clean/tidy/pick-up verbs.
+ */
+export type EntityType =
+  /* spaces you act INSIDE of, cleaning targets */
+  | "cleanable-space"     /* room, kitchen, garage, apartment */
+  | "work-surface"        /* desk, table, counter */
+  | "storage-space"       /* closet, drawer, folder, drive */
+  /* communication artifacts */
+  | "communication-artifact" /* email, message, text, letter */
+  | "person-contact"      /* Sarah, John, boss — a party to contact */
+  /* documents & media */
+  | "document"            /* essay, report, form, thesis */
+  | "reading-material"    /* book, chapter, article, textbook */
+  /* digital systems */
+  | "digital-system"      /* website, app, codebase, portal */
+  | "abstract-project"    /* project, business, launch, campaign */
+  /* physical objects */
+  | "physical-object"     /* tools, dishes, clothes, boxes */
+  | "wearable"            /* clothes, shoes, gear */
+  /* time & misc */
+  | "temporal-reference"  /* Friday, next Tuesday */
+  | "location-venue"      /* gym, store, bank — places you GO TO */
+  | "unclassified";
+
+/** Maps each EntityType to the action families that are VALID on it. */
+export const ENTITY_ACTION_FIT: Record<EntityType, string[]> = {
+  "cleanable-space": ["clean", "tidy", "enter", "approach", "survey"],
+  "work-surface": ["clear", "sit-at", "arrange", "wipe"],
+  "storage-space": ["organize", "sort", "open", "declutter"],
+  "communication-artifact": ["open", "read", "reply", "draft", "send"],
+  "person-contact": ["contact", "message", "call", "ask"],
+  document: ["write", "edit", "open", "print", "review"],
+  "reading-material": ["read", "skim", "open", "annotate"],
+  "digital-system": ["open", "fix", "configure", "inspect"],
+  "abstract-project": ["start", "plan", "advance", "survey"],
+  "physical-object": ["pick-up", "move", "gather", "wash"],
+  wearable: ["lay-out", "gather", "put-on"],
+  "temporal-reference": [],
+  "location-venue": ["go-to", "travel-to", "pack-for"],
+  unclassified: [],
+};
+
 export interface TaskEntity {
   /** Stable id inside one graph (e.g. "e1"). */
   id: string;
@@ -71,6 +119,8 @@ export interface TaskEntity {
   evidence: string;
   /** Which clause (0-based) this entity came from. Head clause = 0. */
   clause?: number;
+  /** Semantic nature — set by the reason layer, not the parse. */
+  entityType?: EntityType;
 }
 
 /* ---------------- the task graph (nodes + typed relation edges) ---------------- */
