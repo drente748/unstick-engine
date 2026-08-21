@@ -40,6 +40,19 @@ function dominantBarrier(beliefs: Belief[]): Belief | null {
   return [...bars].sort((a, b) => b.confidence - a.confidence)[0];
 }
 
+/* ---- DECLARED difficulty: the user TELLS us how hard it feels.
+   This is first-class evidence — stronger than any inference,
+   because the user is the authority on their own capacity. ---- */
+export type DeclaredDifficulty = "easy" | "hard" | "impossible" | null;
+
+export function detectDeclaredDifficulty(text: string): DeclaredDifficulty {
+  const t = text.toLowerCase();
+  if (/\b(impossible|can'?t do it|no way i can|beyond me|whole (life|house)|too much for me)\b/.test(t)) return "impossible";
+  if (/\b(hard|really hard|so hard|struggle|struggling|dread|dreading|overwhelm)\b/.test(t)) return "hard";
+  if (/\b(easy|quick one|simple one|should be quick|no big deal)\b/.test(t)) return "easy";
+  return null;
+}
+
 export function decide(
   beliefs: Belief[],
   graph: TaskGraph,
@@ -57,6 +70,24 @@ export function decide(
   let askInsteadOfAct = false;
   let persona: PersonaId = "direct";
   let program: string | null = null;
+
+  /* ---- DECLARED difficulty overrides inference ----
+     The user is the authority on their own capacity. */
+  const declared = detectDeclaredDifficulty(taskText);
+  if (declared === "easy") {
+    sizeDelta = 0;
+    persona = "direct";
+    why.push("declared:easy -> normal size, direct voice, no hand-holding");
+  } else if (declared === "hard") {
+    sizeDelta = -1;
+    persona = "gentle";
+    why.push("declared:hard -> shrink step, gentle voice");
+  } else if (declared === "impossible") {
+    sizeDelta = -1;
+    persona = "gentle";
+    program = "rescue-ladder";
+    why.push("declared:impossible -> rescue ladder + radical shrink");
+  }
 
   /* ---- feedback-driven adjustments (strongest signal) ---- */
   if (feedback) {
@@ -152,6 +183,13 @@ export function decide(
   if (graph.clauses.length > 1 && persona === "direct") {
     persona = "structured";
     why.push("multi-clause -> structured persona");
+  }
+
+  /* declared "easy" wins over barrier-driven gentleness: the user
+     said it's easy — don't talk down to them */
+  if (declared === "easy") {
+    persona = "direct";
+    why.push("declared:easy overrides gentle persona");
   }
 
   /* ---- technique selection from the knowledge base ----

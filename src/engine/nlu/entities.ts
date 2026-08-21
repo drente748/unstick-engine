@@ -238,8 +238,11 @@ export function extractEntities(clauseText: string): TaskEntity[] {
          after it ("putting off cleaning the garage" -> skip to
          what follows "cleaning") — stop this core here */
       if (j > verbIdx + 1 && (VERBS[w] || VERBS[stem(w)])) break;
-      const origTokens = title.split(/\s+/);
-      coreWords.push(origTokens[j] ?? w);
+      /* NOTE: push w (the normalized token) — indexing the RAW
+         title by j drifts when punctuation was stripped during
+         tokenize ("easy — wash" loses a slot), which once made
+         target="the" instead of "dishes". */
+      coreWords.push(w);
       /* a known place/tool IS the whole target by itself */
       if (PLACES.includes(w) || TOOLS.includes(w)) break;
     }

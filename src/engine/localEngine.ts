@@ -898,6 +898,45 @@ export function runEngineTests(): TestResults {
     ok(true, "agent/overwhelm-path-safe", "no crash on overwhelm escalation");
   }
 
+  /* ---------- T-D · declared difficulty (easy / hard / impossible) ---------- */
+  {
+    /* easy: direct voice, no shrink, no hand-holding */
+    const sE = newAgentState();
+    const rE = agentNext("Easy: reply to John's email", sE);
+    ok(rE.persona === "Direct", "diff/easy-direct", rE.persona);
+    ok(rE.decision.sizeDelta === 0, "diff/easy-size", String(rE.decision.sizeDelta));
+    ok(!rE.display.includes("No pressure"), "diff/easy-no-handhold", rE.display.slice(0, 50));
+
+    /* hard: gentle + shrink */
+    const sH = newAgentState();
+    const rH = agentNext("Hard: clean my room", sH);
+    ok(rH.persona === "Gentle", "diff/hard-gentle", rH.persona);
+    ok(rH.decision.sizeDelta === -1, "diff/hard-shrink", String(rH.decision.sizeDelta));
+
+    /* impossible: rescue ladder + gentle + radical shrink */
+    const sI = newAgentState();
+    const rI = agentNext("Impossible: finish my thesis", sI);
+    ok(rI.decision.program === "rescue-ladder", "diff/impossible-program", String(rI.decision.program));
+    ok(rI.persona === "Gentle", "diff/impossible-gentle", rI.persona);
+    ok(rI.decision.sizeDelta === -1, "diff/impossible-shrink", String(rI.decision.sizeDelta));
+
+    /* em-dash index-drift regression: target must be the OBJECT,
+       never a stray article ("the") */
+    const gEm = buildTaskGraph("This is easy — wash the dishes");
+    ok(gEm.primaryTarget?.key === "dishes", "diff/emdash-target", gEm.primaryTarget?.text ?? "none");
+
+    /* calibration: same feedback, different voices by difficulty */
+    const cE = newAgentState();
+    const ce1 = agentNext("Quick one: pay the electricity bill", cE);
+    agentFeedback("Quick one: pay the electricity bill", cE, ce1.beliefs, { kind: "too-big" });
+    const ce2 = agentNext("Quick one: pay the electricity bill", cE);
+    const cI = newAgentState();
+    const ci1 = agentNext("This feels impossible — clean my entire house", cI);
+    agentFeedback("This feels impossible — clean my entire house", cI, ci1.beliefs, { kind: "too-big" });
+    const ci2 = agentNext("This feels impossible — clean my entire house", cI);
+    ok(ce2.persona !== ci2.persona, "diff/calibration-voices", `${ce2.persona} vs ${ci2.persona}`);
+  }
+
   /* ---------- global invariants over everything emitted above ---------- */
   ok(
     allActions.every((s) => s.trim().length > 0 && passesGuardrails(s)),
