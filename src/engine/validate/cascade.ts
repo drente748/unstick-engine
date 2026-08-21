@@ -67,11 +67,24 @@ export function checkSemantic(c: CandidateV5, g: TaskGraph): Verdict {
     "physical-object": ["pick-up", "move", "gather", "wash"],
     wearable: ["lay-out", "gather", "put-on"],
     "location-venue": ["go-to", "travel-to", "pack-for"],
-    unclassified: ["open", "approach", "survey", "start", "plan", "ask"],
+    unclassified: ["open", "approach", "survey", "start", "plan", "ask", "move", "lay-out", "write"],
   };
+  /* universal starting moves are valid on ANY entity type — they
+     assume nothing about the thing's nature ("put it in front of
+     you", "lay out what you need", "write it on a note") */
+  const UNIVERSAL = ["move", "lay-out", "ask"];
+  /* writing ON A NOTE/LIST about the target is prep, not action on
+     the target itself ("write groceries on a shopping note") */
+  const writeOnNote = family === "write" && /\b(note|list)\b/.test(c.action.toLowerCase());
   const allowed = FIT[t] ?? [];
-  if (allowed.length === 0 || allowed.includes(family)) {
-    return ok(`"${family}" fits ${t}`);
+  if (allowed.length === 0 || allowed.includes(family) || UNIVERSAL.includes(family) || writeOnNote) {
+    return ok(`"${family}" fits ${t}${writeOnNote ? " (note-writing is prep)" : ""}`);
+  }
+  /* inbox-clearing context: organizing passes over a communication
+     artifact are legitimate ("clear my email inbox" — the artifact
+     IS the pile) */
+  if (t === "communication-artifact" && ["sort", "organize"].includes(family)) {
+    return ok(`organizing pass over communication-artifact (inbox context)`);
   }
   return reject("semantic", `"${family}" invalid on ${t} (valid: ${allowed.join(", ")})`);
 }

@@ -60,8 +60,13 @@ function isStartingBarrier(beliefs: Belief[]): boolean {
    const recipient = g.recipient
      ? displayEntity(g.recipient.text, g.recipient.evidence)
      : "them";
+   /* no explicit target: communication intents imply a message
+      artifact ("email my boss" -> open the message), not "the task" */
+   const COMM = new Set(["reply", "initiate-contact", "follow-up", "cancel-plan", "negotiate"]);
+   const targetDisplay = g.primaryTarget?.text
+     ?? (COMM.has(g.subIntent) ? "the message" : "the task");
    return template
-     .replace(/\{target\}/g, g.primaryTarget?.text ?? "the task")
+     .replace(/\{target\}/g, targetDisplay)
      .replace(/\{recipient\}/g, recipient)
      .replace(/\{topic\}/g, g.topic?.text ?? "it");
  }

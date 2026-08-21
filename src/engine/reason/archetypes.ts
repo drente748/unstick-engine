@@ -30,7 +30,7 @@ const COMMUNICATION: Archetype = {
   subIntents: ["reply", "initiate-contact", "follow-up", "cancel-plan", "negotiate"],
   features: ["target:communication-artifact", "recipient:person-contact"],
   playbook: [
-    { via: "target", template: "Open {target} and read the last message only.", size: 1 },
+    { via: "target", template: "Open {target} and read the last item only.", size: 1 },
     { via: "target", template: "Write the first line of your reply to {recipient} — stop there.", size: 2 },
     { via: "target", template: "Draft the full reply fast and ugly. Sending is a later step.", size: 3 },
   ],
