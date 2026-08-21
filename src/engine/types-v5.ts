@@ -193,7 +193,8 @@ export interface Belief {
     | "barrier"          /* why the user is stuck */
     | "capacity"         /* how much initiation energy exists now */
     | "fidelity-risk"    /* risk that a step type will drift off-task */
-    | "momentum";        /* current momentum state */
+    | "momentum"         /* current momentum state */
+    | "sustain-risk";    /* started-then-quit pattern (Phase 4) */
   value: string;
   /** 0..1 */
   confidence: number;

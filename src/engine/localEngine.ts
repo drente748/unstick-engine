@@ -70,6 +70,7 @@ import { inferFromGraph } from "./reason/infer";
 import { checkActionFit, sitAtRoomIsRejected } from "./reason/critic";
 import { archetypeIds, coveredIntents } from "./reason/archetypes";
 import { generateFirstStep } from "./pipeline";
+import { newAgentState, agentNext, agentFeedback } from "./agent";
 import { computeProfile, emptyProfile } from "./profile";
 
 /** The nine named blockers offered in the state check. */
@@ -798,6 +799,57 @@ export function runEngineTests(): TestResults {
     ok(gGuitar.subIntent === "practice-skill", "self/learn-skill", gGuitar.subIntent);
     /* gym venue intent */
     ok(buildTaskGraph("I should go to the gym").subIntent === "physical-activity", "self/go-gym", "go+gym -> physical-activity");
+  }
+
+  /* ---------- T-A · Phase 4 agent: beliefs + policy + personas + programs ---------- */
+  {
+    const st = newAgentState();
+    const TASK = "Clean my room";
+
+    /* turn 1: baseline */
+    const t1 = agentNext(TASK, st);
+    ok(t1.step !== null, "agent/turn1-step", t1.display);
+    ok(t1.decision.technique !== null, "agent/technique-picked", String(t1.decision.technique?.id));
+    ok(t1.trace.policyRationale.length > 0, "agent/policy-rationale", t1.decision.rationale.join(","));
+
+    /* too-big feedback -> rescue-ladder program + gentle persona */
+    agentFeedback(TASK, st, t1.beliefs, { kind: "too-big" });
+    const t2 = agentNext(TASK, st);
+    ok(t2.decision.program === "rescue-ladder", "agent/too-big-program", String(t2.decision.program));
+    ok(t2.persona === "Gentle", "agent/too-big-persona", t2.persona);
+    ok(t2.display.includes("No pressure"), "agent/gentle-dressing", t2.display.slice(0, 40));
+    /* feedback consumed exactly once */
+    const t2b = agentNext(TASK, st);
+    ok(t2b.decision.program === null, "agent/feedback-consumed-once", String(t2b.decision.program));
+
+    /* worked feedback -> momentum persona + grow */
+    agentFeedback(TASK, st, t2.beliefs, { kind: "worked" });
+    const t3 = agentNext(TASK, st);
+    ok(t3.persona === "Momentum", "agent/worked-persona", t3.persona);
+    ok(t3.decision.sizeDelta === 1, "agent/worked-grow", String(t3.decision.sizeDelta));
+
+    /* abandoned@0 -> re-entry ritual; abandoned@mid -> transition buffer */
+    agentFeedback(TASK, st, t3.beliefs, { kind: "abandoned-at", at: 0 });
+    const t4 = agentNext(TASK, st);
+    ok(t4.decision.program === "re-entry-ritual", "agent/abandon0-program", String(t4.decision.program));
+    agentFeedback(TASK, st, t4.beliefs, { kind: "abandoned-at", at: 0.5 });
+    const t5 = agentNext(TASK, st);
+    ok(t5.decision.program === "transition-buffer", "agent/abandonmid-program", String(t5.decision.program));
+
+    /* belief revision is real: too-big raises capacity=low */
+    const st2 = newAgentState();
+    const a1 = agentNext("Pay the electricity bill", st2);
+    const b1 = a1.beliefs.find((b) => b.kind === "capacity");
+    agentFeedback("Pay the electricity bill", st2, a1.beliefs, { kind: "too-big" });
+    const a2 = agentNext("Pay the electricity bill", st2);
+    const b2 = a2.beliefs.find((b) => b.kind === "capacity");
+    ok(b2 !== undefined && b2.value === "low" && (b1 === undefined || b2.confidence > (b1?.confidence ?? 0)), "agent/belief-revision", `${b1?.value}@${b1?.confidence} -> ${b2?.value}@${b2?.confidence}`);
+
+    /* technique rotation: never the same technique twice in a row */
+    ok(t1.decision.technique?.id !== t2.decision.technique?.id, "agent/technique-rotates", `${t1.decision.technique?.id} vs ${t2.decision.technique?.id}`);
+
+    /* personas never change the STEP, only the dressing */
+    ok(t3.display.includes(t3.step ?? "###never###"), "agent/persona-preserves-step", t3.display);
   }
 
   /* ---------- global invariants over everything emitted above ---------- */
