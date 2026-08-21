@@ -54,13 +54,15 @@ export const VERBS: Record<string, string> = {
   buy: "shopping", donate: "donating",
   do: "an attempt", watch: "watching", take: "taking", fold: "folding",
   stop: "a stop", avoid: "an avoidance",
+  open: "opening", make: "making", redesign: "a redesign",
+  fill: "filling", sign: "signing", clear: "clearing",
 };
 
 /** Stopwords for matching only. Exported for the v5 NLU layer. */
 export const STOPWORDS = new Set([
   "the", "a", "an", "my", "our", "your", "his", "her", "their", "some", "for", "to", "on", "in",
   "of", "up", "about", "and", "or", "then", "with", "at", "from", "me", "us", "him", "them",
-  "into", "onto", "by",
+  "into", "onto", "by", "out",
   "that", "this", "it", "its", "is", "are", "be", "do", "does", "need", "have", "has", "will",
   "should", "can", "must", "really", "finally", "just", "also", "again", "today", "now", "soon",
   "asap", "please", "i", "we", "you", "he", "she", "they", "there", "here", "all", "everything",

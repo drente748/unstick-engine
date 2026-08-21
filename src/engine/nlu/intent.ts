@@ -45,9 +45,9 @@ const GATHER_HINTS = /\b(find out|look into|research|read up|explore options|sho
 /** Admin refinement. */
 const SCHEDULE_HINTS = /\b(book|schedule|appointment|reserve|make an appointment)\b/i;
 const PAY_HINTS = /\b(pay|bill|invoice|rent|fine|subscription)\b/i;
-const FORM_HINTS = /\b(submit|form|application|file (my|the|a) (tax|return|claim)|paperwork)\b/i;
+const FORM_HINTS = /\b(submit|form|application|file (my|the|a) (tax|return|claim)|paperwork|fill out)\b/i;
 const BUY_HINTS = /\b(buy|order|purchase|get .* from)\b/i;
-const ORGANIZE_HINTS = /\b(organize|organise|sort|declutter|archive|clean up my (files?|desktop|inbox))\b/i;
+const ORGANIZE_HINTS = /\b(organize|organise|sort|declutter|archive|clean up my (files?|desktop|inbox)|clear (my )?(email )?inbox|empty (my )?inbox|clear (my )?emails?)\b/i;
 
 /** Physical refinement. */
 const ACTIVITY_HINTS = /\b(walk|run|gym|workout|stretch|exercise|yoga|jog|push-?ups?|situps?|squats?|reps?|plank)\b/i;
@@ -98,6 +98,13 @@ export function classifySubIntent(
   if (SCHEDULE_HINTS.test(t)) {
     ev.push("hint:schedule");
     return { subIntent: "schedule-appointment", evidence: ev };
+  }
+  /* clearing/organizing an inbox or file collection is organizing,
+     NOT communication — must precede the message-noun reply rule
+     ("clear my email inbox" must never become "write to someone") */
+  if ((verb === "clear" || verb === "clean") && ORGANIZE_HINTS.test(t)) {
+    ev.push("verb:clear/clean + organize-object");
+    return { subIntent: "file-organize", evidence: ev };
   }
   if (PAY_HINTS.test(t) && (verb === "pay" || roles.has("target"))) {
     ev.push("hint:pay");
