@@ -31,6 +31,8 @@ export function checkStructural(c: CandidateV5): Verdict {
 }
 
 /** Gate 2 — semantic: strategy family vs target nature. */
+const COMM_SUBINTENTS = new Set(["reply", "initiate-contact", "follow-up", "cancel-plan", "negotiate"]);
+
 export function checkSemantic(c: CandidateV5, g: TaskGraph): Verdict {
   const t = g.primaryTarget?.entityType ?? "unclassified";
   const verb0 = c.action.split(/\s+/)[0]?.toLowerCase() ?? "";
@@ -86,6 +88,17 @@ export function checkSemantic(c: CandidateV5, g: TaskGraph): Verdict {
   if (t === "communication-artifact" && ["sort", "organize"].includes(family)) {
     return ok(`organizing pass over communication-artifact (inbox context)`);
   }
+  /* COMMUNICATION OVERRIDE: when the sub-intent is communicative,
+     messaging verbs are valid regardless of the recovered target's
+     nature — you message a person ABOUT anything (a project, a
+     form, an abstract plan). The target is the SUBJECT here, not
+     the thing being acted on. */
+  if (
+    COMM_SUBINTENTS.has(c.subIntent) &&
+    ["write", "reply", "draft", "send", "contact", "message", "call", "ask", "open", "read"].includes(family)
+  ) {
+    return ok(`communication verb "${family}" on ${t} (subIntent=${c.subIntent})`);
+  }
   return reject("semantic", `"${family}" invalid on ${t} (valid: ${allowed.join(", ")})`);
 }
 
@@ -117,7 +130,7 @@ export function checkExecutability(c: CandidateV5): Verdict {
   if (/\b(first|second|third|next),? (you|we)\b/.test(a)) return reject("executability", "numbered plan language");
   if (c.action.split(",").length > 3) return reject("executability", "too many clauses for one step");
   /* must contain at least one concrete action verb */
-  const CONCRETE = /\b(enter|pick|clear|open|read|write|reply|draft|send|text|call|sort|organize|fix|set|lay|walk|stand|sit|say|find|put|gather|do|give|name|look|place|fill|sign|pay|submit|watch|take|wash|empty)\b/;
+  const CONCRETE = /\b(enter|pick|clear|open|read|write|reply|draft|send|text|call|sort|organize|fix|set|lay|walk|stand|sit|say|find|put|gather|do|give|name|look|place|fill|sign|pay|submit|watch|take|wash|empty|make|reproduce|try|grab|hold)\b/;
   if (!CONCRETE.test(a)) return reject("executability", "no concrete action verb");
   return ok("one executable move");
 }
@@ -150,6 +163,16 @@ export function checkCritic(c: CandidateV5): Verdict {
   /* future/conditional framing defers action */
   if (/\b(you should|you could|maybe|eventually|someday)\b/.test(a)) {
     return reject("critic", "deferring language — not a now-step");
+  }
+  /* META-COACHING: instructions ABOUT how to think about the task
+     are not actions ("Ask what's the cheapest move", "do the smallest
+     version", "start one inch past") — the user must be able to act
+     on the sentence directly. */
+  if (
+    /^ask\b/.test(a) ||
+    /\b(smallest (version|bit|slice)|worst acceptable|one inch past|cheapest possible|first real action|minimal version)\b/.test(a)
+  ) {
+    return reject("critic", "meta-coaching — describe the action itself");
   }
   return ok("stranger-executable");
 }

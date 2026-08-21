@@ -361,7 +361,6 @@ export function planFirstStep(
 /** The minimum viable version, phrased from the task's own words. */
 export function minimumViable(a: TaskAnalysis): string {
   const o = a.object;
-  const v = a.verbPhrase ?? "the first bit";
   switch (a.structure) {
     case "writing": return `One terrible paragraph of ${o}.`;
     case "cleaning": return `One surface clear — ${a.place ? `start at the ${a.place}` : "anywhere"}.`;
@@ -375,6 +374,11 @@ export function minimumViable(a: TaskAnalysis): string {
     case "organizing": return `One drawer, one folder, one pile. Done is done.`;
     case "prep": return `Lay out the two things you'll need. Stop there.`;
     case "project": return `Open it and find where you left off. That's the task.`;
-    default: return `Do ${v} for 30 seconds. Stop after.`;
+    /* default stays concrete: always anchor to the object, never a bare
+       "the first bit" (which once produced undefined 30-second steps) */
+    default:
+      return o && o !== "the task"
+        ? `Do one tiny piece of ${o} for 30 seconds — one open, one touch, one line.`
+        : `Open whatever this task lives in and touch it once. Stop after.`;
   }
 }

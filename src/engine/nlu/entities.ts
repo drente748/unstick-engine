@@ -21,8 +21,21 @@ const MESSAGE_NOUNS = new Set([
 /** Words that introduce a topic ("about the invoice", "for my exam"). */
 const TOPIC_MARKERS = new Set(["about", "regarding", "concerning", "for"]);
 
-/** Possessive marker: "Sarah's" -> owner Sarah. */
-const POSSESSIVE = /^([a-z]+)'s?\b/i;
+/** Possessive marker — STRICT: a capitalized name followed by 's.
+ * Contractions ("I've", "don't", "haven't", "what's") must NEVER
+ * match: they once manufactured fake people (owner=I, owner=don,
+ * owner=haven, owner=what). */
+const POSSESSIVE = /^([A-Z][a-z]+)'s\b/;
+
+/** Words that can never be people, even capitalized mid-sentence
+ * (contraction stems, question words, pronouns). */
+const NOT_PERSON = new Set([
+  "i", "im", "ive", "ill", "id", "dont", "doesnt", "didnt", "havent", "hasnt",
+  "hadnt", "cant", "wont", "wouldnt", "couldnt", "shouldnt", "what", "whats",
+  "when", "where", "why", "how", "which", "who", "this", "that", "these",
+  "those", "there", "here", "it", "its", "the", "a", "an", "and", "but",
+  "yet", "so", "or", "if", "then", "than", "because", "been", "being",
+]);
 
 /** Day/month names — capitalized but NEVER people. Exported for the graph quality gate. */
 export const TEMPORAL_WORDS = new Set([
@@ -86,22 +99,26 @@ export function extractEntities(clauseText: string): TaskEntity[] {
     /* temporal words are NEVER people, even in possessive form
        ("Friday's exam" — Friday owns an exam, it is still a day) */
     if (TEMPORAL_WORDS.has(bare)) continue;
+    /* pronouns/contractions/question words are NEVER people
+       ("don't" once became a person named "Don") */
+    if (NOT_PERSON.has(bare) || NOT_PERSON.has(bare.replace(/s$/, ""))) continue;
     if (PEOPLE.includes(bare)) {
       push({ role: "person", text: capitalize(bare), key: bare, confidence: 0.9, evidence: `lexicon:people:${bare}` });
       continue;
     }
     /* a capitalized non-lexicon word mid-task is likely a name
        ("email Sarah about...") — record as person with lower confidence,
-       unless it is sentence-initial (could be anything) */
+       unless it is sentence-initial (could be anything) or a blocked word */
     if (
       isProperName(orig) && i > 0 && !STOPWORDS.has(w) &&
+      !NOT_PERSON.has(w) &&
       !TOOLS.includes(w) && !PLACES.includes(w) &&
       !TEMPORAL_WORDS.has(w) /* days/months are times, never people */
     ) {
       push({ role: "person", text: orig, key: w, confidence: 0.7, evidence: `proper-name:${orig}` });
     }
   }
-  if (owner) {
+  if (owner && !NOT_PERSON.has(owner.toLowerCase())) {
     push({ role: "person", text: capitalize(owner), key: owner.toLowerCase(), confidence: 0.85, evidence: `possessive:${owner}'s` });
   }
 

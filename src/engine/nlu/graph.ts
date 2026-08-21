@@ -98,15 +98,51 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
   }
 
   /* ---- entities from REMAINING clauses (multi-part tasks) — tagged
-     with their clause index, kept OUT of the head relations ---- */
+     with their clause index, kept OUT of the head relations.
+     BARRIER-CLAUSE FILTER: a secondary clause that only carries
+     emotion/avoidance ("but I've been avoiding it", "I'm nervous
+     about what to say") is NOT work — extracting entities from it
+     produced corrupted targets like "but ive been". A clause is
+     skipped when it starts with a contrastive conjunction or has
+     no known task verb. ---- */
   const secondaryVerbs: string[] = [];
   const secondary: TaskEntity[] = [];
+  const CONTRASTIVE = /^(but|though|although|however|yet)\b/i;
+  /* negation-only status clauses: "I haven't started studying yet",
+     "I don't know where to start" — they DESCRIBE the stall, they
+     are not work. Their verbs (start/know) are not task moves. */
+  const NEGATION_ONLY = /\b(haven'?t|hasn'?t|didn'?t|don'?t|not sure|no idea)\b/i;
   for (let ci = 1; ci < clauses.length; ci++) {
     const cText = clauses[ci].text;
+    if (CONTRASTIVE.test(cText.trim())) continue; /* emotional tail */
+    if (NEGATION_ONLY.test(cText)) continue; /* status update, not work */
     const cVerb = findVerbBase(cText);
-    if (cVerb) secondaryVerbs.push(cVerb.base);
+    if (!cVerb) continue; /* no task verb -> not work */
+    secondaryVerbs.push(cVerb.base);
     const cEnts = extractEntities(cText).map((e) => ({ ...e, clause: ci }));
     secondary.push(...cEnts);
+  }
+
+  /* ---- SEMANTIC TARGET RECOVERY: when no explicit target was
+     extracted but the graph KNOWS the participants (person + topic
+     on a communication intent), synthesize a clean semantic object
+     from those roles instead of leaving NONE. This is relation-
+     driven ("reply to my boss about the project" -> "the project"),
+     never a raw text slice. ---- */
+  if (!target && entities.length > 0) {
+    const topicE = entities.find((e) => e.role === "topic" && e.entityType !== "unclassified");
+    const toolE = entities.find((e) => e.role === "tool");
+    const personE = entities.find((e) => e.role === "person");
+    if (topicE) {
+      target = { ...topicE, role: "target", id: `e${entities.length + 1}`, confidence: 0.7, evidence: "semantic-recovery:topic" };
+      entities.push(target);
+    } else if (toolE) {
+      target = { ...toolE, role: "target", id: `e${entities.length + 1}`, confidence: 0.65, evidence: "semantic-recovery:artifact" };
+      entities.push(target);
+    } else if (personE) {
+      target = { ...personE, role: "target", id: `e${entities.length + 1}`, confidence: 0.6, evidence: "semantic-recovery:party" };
+      entities.push(target);
+    }
   }
 
   /* ---- relation edges (typed, evidence-backed) ----

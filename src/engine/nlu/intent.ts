@@ -75,7 +75,7 @@ const CLEAN_HINTS = /\b(clean|scrub|mop|vacuum|dust|wash the (dishes|laundry))\b
 const TIDY_HINTS = /\b(tidy|declutter|organize the|pick up the)\b/i;
 
 /** Tech refinement. */
-const FIX_HINTS = /\b(fix|repair|debug|troubleshoot|not working|broken|crashed)\b/i;
+const FIX_HINTS = /\b(fix|repair|debug|troubleshoot|not working|broken|crashed?|crashing|freez(e|es|ing)|hang(s|ing)|shuts? down|won'?t (start|boot|turn on))\b/i;
 const BUILD_HINTS = /\b(build|develop|code|launch|ship|set up my (site|app))\b/i;
 const CONFIGURE_HINTS = /\b(install|configure|set up|migrate|update my)\b/i;
 
@@ -212,6 +212,12 @@ export function classifySubIntent(
   }
 
   /* ---- learning ---- */
+  /* exam/test wording implies study even without "study" as the verb
+     ("I have a huge history exam tomorrow") */
+  if (/\b(exams?|tests?|quiz(zes)?|midterms?|finals?|revision)\b/i.test(t) && (verb === "have" || verb === "start" || verb === "finish" || verb == null)) {
+    ev.push("hint:exam -> study-material");
+    return { subIntent: "study-material", evidence: ev };
+  }
   if (PRACTICE_HINTS.test(t)) {
     ev.push("hint:practice");
     return { subIntent: "practice-skill", evidence: ev };
@@ -255,7 +261,7 @@ function fallbackFamily(verb: string): SubIntent {
     pay: "pay-bill", file: "submit-form", submit: "submit-form", apply: "submit-form",
     renew: "submit-form", book: "schedule-appointment", schedule: "schedule-appointment",
     cancel: "cancel-plan", order: "buy-item",
-    fix: "fix-broken", repair: "fix-broken", debug: "fix-broken",
+    fix: "fix-broken", repair: "fix-broken", debug: "fix-broken", crash: "fix-broken", troubleshoot: "fix-broken",
     code: "build-project", build: "build-project", develop: "build-project",
     design: "design-artifact", draw: "design-artifact", paint: "design-artifact",
     organize: "file-organize", organise: "file-organize", sort: "file-organize",

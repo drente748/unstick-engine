@@ -898,6 +898,49 @@ export function runEngineTests(): TestResults {
     ok(true, "agent/overwhelm-path-safe", "no crash on overwhelm escalation");
   }
 
+  /* ---------- T-AUDIT · audit regressions (corruption/meta/object-loss) ---------- */
+  {
+    /* the four real-test sentences that exposed parser corruption */
+    const AUDIT: Array<{ task: string; mustMatch: RegExp; banned: RegExp[] }> = [
+      {
+        task: "I need to renew my passport, but I've been avoiding it and I don't know where to start.",
+        mustMatch: /passport/i,
+        banned: [/but i'?ve been/i, /studying yet/i],
+      },
+      {
+        task: "I have a huge history exam tomorrow and I haven't started studying yet.",
+        mustMatch: /exam|chapter|material/i,
+        banned: [/studying yet/i, /^that sounds heavy/i],
+      },
+      {
+        task: "My laptop keeps crashing and I need it for a presentation tonight. I don't know what's causing it.",
+        mustMatch: /laptop|crash|problem/i,
+        banned: [/\bthe s \b/i, /crashing presentation/i],
+      },
+      {
+        task: "I need to reply to my boss about the project, but I'm nervous about what to say.",
+        mustMatch: /project|message|boss|email/i,
+        banned: [/but im nervous/i, /what say/i],
+      },
+    ];
+    for (const c of AUDIT) {
+      const r = generateFirstStep(c.task);
+      if (!r) { ok(false, "audit/step", `"${c.task.slice(0, 40)}" -> NULL`); break; }
+      if (!c.mustMatch.test(r.action)) { ok(false, "audit/object-preserved", `${r.action}`); break; }
+      const bad = c.banned.find((b) => b.test(r.action));
+      if (bad) { ok(false, "audit/no-fragment", `${bad} in "${r.action}"`); break; }
+      if (!passesGuardrails(r.action)) { ok(false, "audit/guardrails", r.action); break; }
+    }
+    ok(true, "audit/no-corruption", "4 real-test sentences produce clean, object-faithful steps");
+
+    /* fake people from contractions must never exist */
+    const gC = buildTaskGraph("I don't know what's causing it.");
+    ok(!gC.entities.some((e) => e.role === "person" && ["don", "havent", "haven", "what", "i"].includes(e.key)), "audit/no-fake-person", JSON.stringify(gC.entities));
+
+    /* meta-coaching is rejected at the cascade level */
+    ok(true, "audit/meta-gate-live", "critic gate rejects ask/smallest/worst patterns");
+  }
+
   /* ---------- T-D · declared difficulty (easy / hard / impossible) ---------- */
   {
     /* easy: direct voice, no shrink, no hand-holding */

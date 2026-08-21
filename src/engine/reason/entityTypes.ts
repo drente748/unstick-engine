@@ -36,6 +36,9 @@ const DOCUMENTS = new Set([
   "essay", "report", "form", "thesis", "application", "paper", "contract",
   "invoice", "bill", "proposal", "resume", "cv", "presentation", "slides",
   "spreadsheet", "budget",
+  /* assessments & renewals are document-work too */
+  "exam", "exams", "test", "quiz", "midterm", "final", "passport",
+  "passport renewal", "license", "visa", "tax return", "permit",
 ]);
 
 /* ---- reading material ---- */
