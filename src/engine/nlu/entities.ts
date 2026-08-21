@@ -24,8 +24,8 @@ const TOPIC_MARKERS = new Set(["about", "regarding", "concerning", "for"]);
 /** Possessive marker: "Sarah's" -> owner Sarah. */
 const POSSESSIVE = /^([a-z]+)'s?\b/i;
 
-/** Day/month names — capitalized but NEVER people. */
-const TEMPORAL_WORDS = new Set([
+/** Day/month names — capitalized but NEVER people. Exported for the graph quality gate. */
+export const TEMPORAL_WORDS = new Set([
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
   "january", "february", "march", "april", "may", "june", "july",
   "august", "september", "october", "november", "december",
@@ -35,8 +35,8 @@ const TEMPORAL_WORDS = new Set([
 /** Temporal markers that START a time phrase ("before Friday"). */
 const TIME_MARKERS = new Set(["before", "by", "until", "on"]);
 
-/** Temporal modifiers that fuse with the following day ("next Tuesday"). */
-const TEMPORAL_MODIFIERS = new Set(["next", "this", "coming", "last", "every"]);
+/** Temporal modifiers that fuse with the following day ("next Tuesday"). Exported for the graph quality gate. */
+export const TEMPORAL_MODIFIERS = new Set(["next", "this", "coming", "last", "every"]);
 
 /** Capitalized word(s) at a position — likely a proper name. */
 function isProperName(word: string): boolean {
@@ -83,6 +83,9 @@ export function extractEntities(clauseText: string): TaskEntity[] {
       continue;
     }
     const bare = w.replace(/'s$/, "");
+    /* temporal words are NEVER people, even in possessive form
+       ("Friday's exam" — Friday owns an exam, it is still a day) */
+    if (TEMPORAL_WORDS.has(bare)) continue;
     if (PEOPLE.includes(bare)) {
       push({ role: "person", text: capitalize(bare), key: bare, confidence: 0.9, evidence: `lexicon:people:${bare}` });
       continue;
@@ -222,12 +225,20 @@ export function extractEntities(clauseText: string): TaskEntity[] {
       if (TEMPORAL_WORDS.has(w)) break;
       /* skip pure function words at the start (to/the/my) */
       if (STOPWORDS.has(w) && coreWords.length === 0) continue;
+      /* a PERSON is never the target of the artifact sense —
+         "email my boss": boss is the recipient, target stays implicit */
+      if (PEOPLE.includes(w)) break;
       const origTokens = title.split(/\s+/);
       coreWords.push(origTokens[j] ?? w);
       /* a known place/tool IS the whole target by itself */
       if (PLACES.includes(w) || TOOLS.includes(w)) break;
     }
-    if (coreWords.length > 0) {
+    /* drop a core that merely repeats the verb ("Buy groceries" when
+       buy was missed) or is empty */
+    const coreKey = tokenize(coreWords.join(" "))[0] ?? "";
+    const verbWord = verbIdx >= 0 ? words[verbIdx] : "";
+    const useful = coreWords.length > 0 && coreKey !== verbWord;
+    if (useful) {
       push({
         role: "target",
         text: coreWords.join(" "),

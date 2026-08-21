@@ -51,6 +51,7 @@ export const VERBS: Record<string, string> = {
   exercise: "exercising", workout: "a workout", run: "a run", stretch: "a stretch",
   message: "a message", contact: "a message", answer: "an answer", send: "sending",
   sell: "a listing", list: "a listing", move: "moving", deliver: "delivering",
+  buy: "shopping", donate: "donating",
 };
 
 /** Stopwords for matching only. Exported for the v5 NLU layer. */

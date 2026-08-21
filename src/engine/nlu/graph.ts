@@ -9,9 +9,9 @@
    English-only, deterministic, evidence-backed.
    ============================================================ */
 
-import { analyzeTask, normalizeTask } from "../analysis";
+import { analyzeTask, normalizeTask, PEOPLE, STOPWORDS, stem, tokenize, VERBS } from "../analysis";
 import { splitClauses } from "./clauses";
-import { extractEntities } from "./entities";
+import { extractEntities, TEMPORAL_WORDS, TEMPORAL_MODIFIERS } from "./entities";
 import { classifySubIntent, findVerbBase } from "./intent";
 import type {
   RelationEdge,
@@ -44,19 +44,57 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
   const intent = classifySubIntent(action, entities, head);
 
   /* ---- ensure a target exists: derive from object phrase when the
-     parse found one but entity extraction missed it ---- */
+     parse found one but entity extraction missed it. QUALITY GATE:
+     the v4 object is a raw word slice — reject it when it contains
+     a person, a temporal word, or a known verb (those mean the
+     slice spans roles and is not a clean artifact phrase). ---- */
   let target: TaskEntity | null = entities.find((e) => e.role === "target") ?? null;
   if (!target && analysis.object && analysis.object.toLowerCase() !== title.toLowerCase() && clauses.length === 1) {
-    const key = analysis.object.toLowerCase();
-    entities.push({
-      id: `e${entities.length + 1}`,
-      role: "target",
-      text: analysis.object,
-      key,
-      confidence: 0.6,
-      evidence: "analysis-object-fallback",
-    });
-    target = entities[entities.length - 1];
+    const objWords = tokenize(analysis.object);
+    /* TRIM instead of reject: cut the slice at the first polluting
+       word (person / temporal / verb) and keep the clean prefix.
+       "the dentist appointment next Tuesday" -> "dentist appointment" */
+    let cut = objWords.length;
+    /* index of the first CONTENT word (stopwords don't count) —
+       a person there is a recipient, not a modifier */
+    let firstContent = -1;
+    for (let i = 0; i < objWords.length; i++) {
+      if (!STOPWORDS.has(objWords[i])) {
+        firstContent = i;
+        break;
+      }
+    }
+    for (let i = 0; i < objWords.length; i++) {
+      const w = objWords[i];
+      /* a PERSON cuts only when it is the first content word
+         (recipient pattern: "email my boss ..." -> boss is not the
+         artifact). Mid-slice a person word is a legitimate modifier
+         ("dentist appointment" = an appointment WITH a dentist). */
+      if (PEOPLE.includes(w) && i === firstContent) {
+        cut = i;
+        break;
+      }
+      if (
+        TEMPORAL_WORDS.has(w) || TEMPORAL_MODIFIERS.has(w) ||
+        Object.prototype.hasOwnProperty.call(VERBS, w) || Object.prototype.hasOwnProperty.call(VERBS, stem(w))
+      ) {
+        cut = i;
+        break;
+      }
+    }
+    const trimmed = objWords.slice(0, cut).filter((w) => !STOPWORDS.has(w));
+    if (trimmed.length > 0) {
+      const key = trimmed.join(" ");
+      entities.push({
+        id: `e${entities.length + 1}`,
+        role: "target",
+        text: trimmed.join(" "),
+        key,
+        confidence: 0.65,
+        evidence: "analysis-object-trimmed",
+      });
+      target = entities[entities.length - 1];
+    }
   }
 
   /* ---- entities from REMAINING clauses (multi-part tasks) — tagged
@@ -78,7 +116,10 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
   const byRole = (r: string) => entities.filter((e) => e.role === r);
 
   const link = (from: TaskEntity | undefined, kind: RelationKind, to: TaskEntity | undefined, conf: number, ev: string) => {
-    if (!from || !to || from.id === to.id) return;
+    if (!from || !to) return;
+    /* never link an entity to itself — by id OR by key (the same
+       word can be extracted twice under different roles) */
+    if (from.id === to.id || from.key === to.key) return;
     if (relations.some((r) => r.from === from.id && r.kind === kind && r.to === to.id)) return;
     relations.push({ from: from.id, kind, to: to.id, confidence: conf, evidence: ev });
   };
