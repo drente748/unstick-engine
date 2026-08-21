@@ -64,7 +64,7 @@ export function agentNext(
   const fb = state.pendingFeedback[taskKey] ?? null;
   delete state.pendingFeedback[taskKey];
 
-  const decision = decide(beliefs, inference.graph, fb, state.lastTechniqueId);
+  const decision = decide(beliefs, inference.graph, fb, state.lastTechniqueId, task);
   state.lastTechniqueId = decision.technique?.id ?? state.lastTechniqueId;
 
   /* program path: a situation protocol replaces the single step */
@@ -89,9 +89,21 @@ export function agentNext(
     }
   }
 
-  /* clarifying question path: ask instead of guessing */
+  /* clarifying question path: ask instead of guessing.
+     When the text expresses a STATE rather than a task (no verb,
+     no target — "everything is too much right now"), echo nothing:
+     use a fixed, warm prompt. Echoing the user's own words back
+     ("what does 'too much right' look like") reads as robotic. */
   if (decision.askInsteadOfAct) {
-    const q = `What does "${inference.graph.primaryTarget?.text ?? task}" look like when it's DONE? One sentence is enough.`;
+    /* a "real task" has a typed target or a known verb — an
+       unclassified slice of an emotional statement is NOT one */
+    const tgt = inference.graph.primaryTarget;
+    const hasRealTask =
+      inference.graph.action != null ||
+      (tgt != null && tgt.entityType !== "unclassified");
+    const q = hasRealTask
+      ? `What does "${tgt?.text ?? task}" look like when it's DONE? One sentence is enough.`
+      : "That sounds heavy. You don't have to solve everything — what's ONE small thing that would make today slightly better?";
     const dressed = dress(q, decision);
     return {
       display: dressed.text,

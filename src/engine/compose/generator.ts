@@ -148,9 +148,19 @@ export function generateCandidates(
       "physical-activity": [`Lay out what you need for ${t}. Clothes count as started.`],
       "practice-skill": [`Get ${t} out and put it in your hands. That's the whole step.`],
       "file-organize": [`Open ${t} and name the first pile you see. Don't sort yet.`],
-      "start-unknown": [`Say out loud what "${t}" actually means. One sentence, to the room.`],
+      "start-unknown": [
+        /* long unclassified "tasks" are usually emotional states, not
+           work ("I'm so overwhelmed I don't even know where to start").
+           Echoing them back reads as robotic — respond warmly instead. */
+        t.length >= 15 && (g.primaryTarget?.entityType ?? "unclassified") === "unclassified"
+          ? "That sounds heavy. Pick ONE small thing and tell me what it is — we'll start there."
+          : `Say out loud what "${t}" actually means. One sentence, to the room.`,
+      ],
     };
-    const lines = FALLBACKS[g.subIntent] ?? [`Do the smallest visible piece of ${t} for two minutes.`];
+    const lines = FALLBACKS[g.subIntent]
+      ?? [g.action
+        ? `Do the smallest visible piece of ${t} for two minutes.`
+        : "That sounds heavy. Pick ONE small thing — even a tiny one — and tell me what it is. We'll start there."];
     for (const line of lines) {
       out.push({
         action: line,

@@ -45,6 +45,7 @@ export function decide(
   graph: TaskGraph,
   feedback: OutcomeFeedback | null,
   lastTechniqueId: string | null,
+  taskText: string,
 ): PolicyDecision {
   const why: string[] = [];
   const barrier = dominantBarrier(beliefs);
@@ -97,14 +98,23 @@ export function decide(
 
   /* ---- belief-driven stance (when no fresh feedback) ---- */
   if (!feedback) {
+    /* self-acknowledged struggle ("I can't...", "I'm so overwhelmed")
+       deserves the gentle voice regardless of task type */
+    if (/\b(can'?t|cannot|so overwhelmed|too much|don'?t know where)\b/i.test(taskText)) {
+      persona = "gentle";
+      why.push("self-struggle-framing -> gentle voice");
+    }
     if (barrier) {
       why.push(`dominant-barrier:${barrier.value}@${barrier.confidence.toFixed(2)}`);
       switch (barrier.value) {
         case "overwhelm":
           sizeDelta = -1;
           persona = "gentle";
-          /* deep overwhelm + no movement -> nervous-system-first program */
-          if (barrier.confidence >= 0.6) program = "freeze-thaw";
+          /* deep overwhelm -> nervous-system-first program. Threshold
+             is HIGH on purpose: multi-clause tasks produce mild
+             overwhelm that does NOT mean neurological freeze. Only
+             strong evidence justifies the somatic protocol. */
+          if (barrier.confidence >= 0.7) program = "freeze-thaw";
           break;
         case "unclear-task":
           askInsteadOfAct = graph.primaryTarget == null || graph.primaryTarget.entityType === "unclassified";
