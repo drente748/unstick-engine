@@ -124,9 +124,15 @@ export function classifySubIntent(
   }
 
   /* ---- physical ---- */
-  if (ACTIVITY_HINTS.test(t) && (verb === "walk" || verb === "run" || verb === "exercise" || verb === "stretch" || verb === "workout")) {
+  if (ACTIVITY_HINTS.test(t) && (verb === "walk" || verb === "run" || verb === "exercise" || verb === "stretch" || verb === "workout" || verb === "go")) {
     ev.push("hint:activity+verb");
     return { subIntent: "physical-activity", evidence: ev };
+  }
+  /* learning a SKILL (guitar, coding) vs reading material —
+     "learn" with a non-document object is practice, not study */
+  if ((verb === "learn" || verb === "practice") && !/\b(chapter|book|textbook|article|notes|manual|guide)\b/i.test(t)) {
+    ev.push(`verb:${verb} + skill-object`);
+    return { subIntent: "practice-skill", evidence: ev };
   }
   if (verb === "clean" || CLEAN_HINTS.test(t)) {
     ev.push(verb === "clean" ? "verb:clean" : "hint:clean");

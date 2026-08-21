@@ -39,7 +39,9 @@ const COMMUNICATION: Archetype = {
 const STUDYING: Archetype = {
   id: "studying",
   name: "Study material",
-  subIntents: ["study-material", "practice-skill"],
+  /* study-material only — practicing a SKILL (guitar, coding) has
+     no reading material to open; it falls to the practice fallback */
+  subIntents: ["study-material"],
   features: ["topic:reading-material", "action:study"],
   playbook: [
     { via: "target", template: "Open {target} and read the first heading only.", size: 1 },

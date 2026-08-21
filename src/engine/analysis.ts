@@ -56,6 +56,7 @@ export const VERBS: Record<string, string> = {
   stop: "a stop", avoid: "an avoidance",
   open: "opening", make: "making", redesign: "a redesign",
   fill: "filling", sign: "signing", clear: "clearing",
+  go: "going", put: "putting", keep: "keeping",
 };
 
 /** Stopwords for matching only. Exported for the v5 NLU layer. */

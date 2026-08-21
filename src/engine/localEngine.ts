@@ -767,6 +767,37 @@ export function runEngineTests(): TestResults {
       }
     }
     ok(true, "p3/trace-evidence", "all traces carry subIntent + candidate count");
+
+    /* ---------- T-S · self-referential framings ("I can't / want /
+       need / have to / should / must") — how users actually type ---------- */
+    const SELF_CASES: Array<[string, string]> = [
+      ["I can't clean my room", "room"],
+      ["I can't reply to my boss's email", "email"],
+      ["I need to wash the dishes", "dishes"],
+      ["I have to study for my exam", "exam"],
+      ["I must pay the rent today", "rent"],
+      ["I keep putting off cleaning the garage", "garage"],
+      ["I should go to the gym", "gym"],
+      ["I want to learn guitar", "guitar"],
+    ];
+    for (const [task, expectedWord] of SELF_CASES) {
+      const sr = generateFirstStep(task);
+      if (!sr || !sr.action.toLowerCase().includes(expectedWord)) {
+        ok(false, "self/frame-step", `"${task}" -> ${sr?.action ?? "NULL"}`);
+        break;
+      }
+      if (!passesGuardrails(sr.action)) {
+        ok(false, "self/guardrails", `${task} -> ${sr.action}`);
+        break;
+      }
+    }
+    ok(true, "self/frame-step", "all 8 self-framings produce target-anchored steps");
+
+    /* skill vs material: guitar is practice (hands), not reading */
+    const gGuitar = buildTaskGraph("I want to learn guitar");
+    ok(gGuitar.subIntent === "practice-skill", "self/learn-skill", gGuitar.subIntent);
+    /* gym venue intent */
+    ok(buildTaskGraph("I should go to the gym").subIntent === "physical-activity", "self/go-gym", "go+gym -> physical-activity");
   }
 
   /* ---------- global invariants over everything emitted above ---------- */

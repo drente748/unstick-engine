@@ -47,11 +47,15 @@ function isStartingBarrier(beliefs: Belief[]): boolean {
 /**
  /** Fill a playbook template's role placeholders from the graph.
   * Uses ONLY relation-connected entities — never raw slices.
-  * Lexicon persons (dentist, bank) render as "the dentist";
-  * proper names (Sarah) keep their casing. */
+  * Lexicon persons render as "the dentist"; family relations
+  * (mom, dad, brother...) drop the article: "for mom". */
+ const FAMILY = new Set(["mom", "dad", "mum", "mother", "father", "brother", "sister", "aunt", "uncle", "grandma", "grandpa", "wife", "husband", "partner", "son", "daughter"]);
+
  function displayEntity(text: string, evidence: string): string {
+   const lower = text.toLowerCase();
+   if (FAMILY.has(lower)) return lower;
    if (evidence.startsWith("lexicon:people") || evidence.startsWith("lexicon:place")) {
-     return `the ${text.toLowerCase()}`;
+     return `the ${lower}`;
    }
    return text;
  }
@@ -142,6 +146,7 @@ export function generateCandidates(
       "pay-bill": [`Open ${t} and read the amount due only. Nothing more.`],
       "buy-item": [`Write ${t} on a shopping note. That's the whole step.`],
       "physical-activity": [`Lay out what you need for ${t}. Clothes count as started.`],
+      "practice-skill": [`Get ${t} out and put it in your hands. That's the whole step.`],
       "file-organize": [`Open ${t} and name the first pile you see. Don't sort yet.`],
       "start-unknown": [`Say out loud what "${t}" actually means. One sentence, to the room.`],
     };
