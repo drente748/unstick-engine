@@ -63,7 +63,7 @@ export const VERBS: Record<string, string> = {
 export const STOPWORDS = new Set([
   "the", "a", "an", "my", "our", "your", "his", "her", "their", "some", "for", "to", "on", "in",
   "of", "up", "about", "and", "or", "then", "with", "at", "from", "me", "us", "him", "them",
-  "into", "onto", "by", "out",
+  "into", "onto", "by", "out", "off",
   "that", "this", "it", "its", "is", "are", "be", "do", "does", "need", "have", "has", "will",
   "should", "can", "must", "really", "finally", "just", "also", "again", "today", "now", "soon",
   "asap", "please", "i", "we", "you", "he", "she", "they", "there", "here", "all", "everything",

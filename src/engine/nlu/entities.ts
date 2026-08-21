@@ -201,9 +201,15 @@ export function extractEntities(clauseText: string): TaskEntity[] {
      itself never becomes the target ("reply to Sarah's email" ->
      target=email, not reply) ---- */
   const verbIdx = (() => {
+    /* framing verbs ("keep putting off") hide the real verb —
+       skip them so the target core starts after the REAL verb */
+    const FRAMING = new Set(["keep", "keeps", "kept", "putting", "avoid", "avoiding", "postpone", "postponing", "delay", "delaying"]);
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
-      if (Object.prototype.hasOwnProperty.call(VERBS, w) || Object.prototype.hasOwnProperty.call(VERBS, stem(w))) return i;
+      const hit = Object.prototype.hasOwnProperty.call(VERBS, w) || Object.prototype.hasOwnProperty.call(VERBS, stem(w));
+      if (!hit) continue;
+      if (FRAMING.has(w) || FRAMING.has(stem(w))) continue;
+      return i;
     }
     return -1;
   })();
@@ -228,6 +234,10 @@ export function extractEntities(clauseText: string): TaskEntity[] {
       /* a PERSON is never the target of the artifact sense —
          "email my boss": boss is the recipient, target stays implicit */
       if (PEOPLE.includes(w)) break;
+      /* another KNOWN VERB mid-core means the real object comes
+         after it ("putting off cleaning the garage" -> skip to
+         what follows "cleaning") — stop this core here */
+      if (j > verbIdx + 1 && (VERBS[w] || VERBS[stem(w)])) break;
       const origTokens = title.split(/\s+/);
       coreWords.push(origTokens[j] ?? w);
       /* a known place/tool IS the whole target by itself */
