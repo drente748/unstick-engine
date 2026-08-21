@@ -28,7 +28,8 @@ export interface InferenceResult {
  * Deterministic: same graph in, same result out.
  */
 export function inferFromGraph(g: TaskGraph): InferenceResult {
-  const typedCount = annotateEntityTypes(g.entities);
+  const COMM_INTENTS = new Set(["reply", "initiate-contact", "follow-up", "cancel-plan", "negotiate"]);
+  const typedCount = annotateEntityTypes(g.entities, COMM_INTENTS.has(g.subIntent));
   const beliefs = deriveBeliefs(g);
   const archetype = matchArchetype(g);
   return { graph: g, beliefs, archetype, typedCount };

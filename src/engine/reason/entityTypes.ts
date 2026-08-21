@@ -75,8 +75,10 @@ const VENUES = new Set([
 /**
  * Classify one entity's semantic nature from its key + role.
  * Role constrains the candidates; the key picks among them.
+ * `isCommContext`: the clause's action is communication — flips
+ * venue-places into contact parties ("call the bank").
  */
-export function classifyEntityType(e: TaskEntity): EntityType {
+export function classifyEntityType(e: TaskEntity, isCommContext = false): EntityType {
   const k = e.key;
 
   switch (e.role) {
@@ -85,7 +87,11 @@ export function classifyEntityType(e: TaskEntity): EntityType {
     case "person":
       return "person-contact";
     case "place":
-      /* place role + known venue -> venue; else it's a space */
+      /* place role + known venue -> venue; else it's a space.
+         EXCEPTION: in a communication context the "place" is the
+         party being contacted ("call the bank") — a contact, not
+         a destination. */
+      if (isCommContext && VENUES.has(k)) return "person-contact";
       if (VENUES.has(k)) return "location-venue";
       if (CLEANABLE.has(k)) return "cleanable-space";
       if (WORK_SURFACES.has(k)) return "work-surface";
@@ -95,6 +101,9 @@ export function classifyEntityType(e: TaskEntity): EntityType {
       if (DIGITAL_SYSTEMS.has(k)) return "digital-system";
       return "unclassified";
     case "target":
+      /* communication context: a venue as target is the party being
+         contacted ("call the bank") — same flip as place role */
+      if (isCommContext && VENUES.has(k)) return "person-contact";
       if (CLEANABLE.has(k)) return "cleanable-space";
       if (WORK_SURFACES.has(k)) return "work-surface";
       if (STORAGE.has(k)) return "storage-space";
@@ -129,10 +138,10 @@ export function classifyEntityType(e: TaskEntity): EntityType {
 }
 
 /** Classify every entity in place; returns count classified. */
-export function annotateEntityTypes(entities: TaskEntity[]): number {
+export function annotateEntityTypes(entities: TaskEntity[], isCommContext = false): number {
   let n = 0;
   for (const e of entities) {
-    e.entityType = classifyEntityType(e);
+    e.entityType = classifyEntityType(e, isCommContext);
     if (e.entityType !== "unclassified") n++;
   }
   return n;

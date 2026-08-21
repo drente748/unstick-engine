@@ -77,6 +77,18 @@ export function deriveBeliefs(g: TaskGraph): Belief[] {
     });
   }
 
+  /* avoidance framing: the task itself is about something the user
+     has been dodging ("stop avoiding my driving lessons") — the
+     barrier is the dodge, not confusion */
+  if (g.action === "stop" || g.action === "avoid") {
+    beliefs.push({
+      kind: "barrier",
+      value: "avoiding",
+      confidence: 0.8,
+      evidence: [`avoidance-verb:${g.action}`, `object:${target?.key ?? "implicit"}`],
+    });
+  }
+
   /* no verb at all -> genuine unclear */
   if (!g.action) {
     beliefs.push({

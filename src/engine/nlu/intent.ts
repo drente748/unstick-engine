@@ -50,7 +50,7 @@ const BUY_HINTS = /\b(buy|order|purchase|get .* from)\b/i;
 const ORGANIZE_HINTS = /\b(organize|organise|sort|declutter|archive|clean up my (files?|desktop|inbox))\b/i;
 
 /** Physical refinement. */
-const ACTIVITY_HINTS = /\b(walk|run|gym|workout|stretch|exercise|yoga|jog)\b/i;
+const ACTIVITY_HINTS = /\b(walk|run|gym|workout|stretch|exercise|yoga|jog|push-?ups?|situps?|squats?|reps?|plank)\b/i;
 const CLEAN_HINTS = /\b(clean|scrub|mop|vacuum|dust|wash the (dishes|laundry))\b/i;
 const TIDY_HINTS = /\b(tidy|declutter|organize the|pick up the)\b/i;
 
@@ -79,6 +79,11 @@ export function classifySubIntent(
   if (verb === "fix" || FIX_HINTS.test(t)) {
     ev.push(verb === "fix" ? "verb:fix" : "hint:fix-wording");
     return { subIntent: "fix-broken", evidence: ev };
+  }
+  /* physical activity: do + reps/exercise noun ("do 10 push-ups") */
+  if (verb === "do" && ACTIVITY_HINTS.test(t)) {
+    ev.push("verb:do + activity-noun");
+    return { subIntent: "physical-activity", evidence: ev };
   }
   if ((verb === "build" || verb === "code" || verb === "develop") && !CONFIGURE_HINTS.test(t)) {
     ev.push(`verb:${verb}`);
