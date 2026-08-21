@@ -46,6 +46,7 @@ export const VERBS: Record<string, string> = {
   paint: "painting", sketch: "sketching", edit: "editing", film: "filming", practice: "practicing",
   cook: "cooking", prep: "prepping", prepare: "preparing", pack: "packing", plan: "planning",
   organize: "organizing", organise: "organizing", sort: "sorting", budget: "a budget",
+  archive: "archiving",
   research: "research", check: "checking", finish: "the last bit", start: "the first bit",
   exercise: "exercising", workout: "a workout", run: "a run", stretch: "a stretch",
   message: "a message", contact: "a message", answer: "an answer", send: "sending",
@@ -56,6 +57,7 @@ export const VERBS: Record<string, string> = {
 export const STOPWORDS = new Set([
   "the", "a", "an", "my", "our", "your", "his", "her", "their", "some", "for", "to", "on", "in",
   "of", "up", "about", "and", "or", "then", "with", "at", "from", "me", "us", "him", "them",
+  "into", "onto", "by",
   "that", "this", "it", "its", "is", "are", "be", "do", "does", "need", "have", "has", "will",
   "should", "can", "must", "really", "finally", "just", "also", "again", "today", "now", "soon",
   "asap", "please", "i", "we", "you", "he", "she", "they", "there", "here", "all", "everything",
