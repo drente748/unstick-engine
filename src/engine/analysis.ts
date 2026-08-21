@@ -22,9 +22,9 @@ import type {
      → capacity.
 
    The parse layer extracts WHAT / WHO / ABOUT-WHAT / WHERE /
-   WITH-WHAT / HOW-BIG / HOW-URGENT from the user's own words, in
-   English AND Arabic, always preserving the original text for
-   display. Every downstream estimate is derived FROM these slots.
+   WITH-WHAT / HOW-BIG / HOW-URGENT from the user's own words,
+   always preserving the original text for display. Every
+   downstream estimate is derived FROM these slots.
    Unknown context stays null — never fabricated.
 
    Pure, deterministic, local. The goal is not to label the task
@@ -123,8 +123,8 @@ export function normalizeTask(raw: string): string {
 
 /**
  * Unicode-safe tokenization for MATCHING ONLY. Display text always
- * uses the original title slice — this never touches what the user sees.
- * Supports Arabic, accented Latin, apostrophes and hyphens.
+ * uses the original title slice — this never touches what the user
+ * sees. Supports accented Latin, apostrophes and hyphens.
  */
 export const tokenize = (s: string): string[] =>
   s
@@ -766,7 +766,7 @@ export function pick<T>(arr: T[], seed: number): T {
 
 /**
  * Unicode-safe normalization for COMPARISON ONLY (never displayed).
- * Keeps letters of every script — Arabic stays Arabic.
+ * Keeps letters of every script so accented words compare cleanly.
  */
 export function normalizeAction(s: string): string {
   return s

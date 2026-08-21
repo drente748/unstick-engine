@@ -4,7 +4,7 @@
 > possible next move — no internet, no API key, no black box.
 
 Unstick is a task-initiation companion for people who know **what** to do but
-can't **start** (or keep going). Give it a task in English or Arabic and it
+can't **start** (or keep going). Give it a task in English and it
 reasons through a deterministic pipeline to suggest a first step so small you
 can't reasonably refuse it.
 
@@ -25,7 +25,7 @@ understand  →  generate  →  size  →  score  →  guardrails  →  dedupe
 
 - **No network calls by default.** Everything is rules + local state.
 - **Fully reproducible.** The same input and history always yield the same
-  first step — this is what makes it testable (324 assertions, 0 flaky tests).
+  first step — this is what makes it testable (300 assertions, 0 flaky tests).
 - An optional remote AI **decoration layer** exists, but every suggestion it
   makes is passed through the same guardrails as local output.
 
@@ -48,7 +48,7 @@ That's it. Open the URL and start typing a task.
 | `npm run build`       | Production bundle (output in `dist/`). |
 | `npm run typecheck`   | `tsc --noEmit` — type-check without emitting. |
 | `npm run test:engine` | **Run the full test suite** (engine + evaluation fixtures). |
-| `npm run smoke`       | Headless smoke test: feeds 14 representative tasks through the engine and prints every step + rationale. |
+| `npm run smoke`       | Headless smoke test: feeds 11 representative tasks through the engine and prints every step + rationale. |
 
 > **Tip:** `npm run test:engine` is the source of truth. The CI runs it on
 > every push — if it's green, the engine's intelligence is locked in.
@@ -106,16 +106,16 @@ src/
 
 ## Testing
 
-The engine ships **324 deterministic assertions** (252 from `runEngineTests` in
-`src/engine/localEngine.ts`, plus 72 driven by the real fixtures in
+The engine ships **300 deterministic assertions** (239 from `runEngineTests` in
+`src/engine/localEngine.ts`, plus 61 driven by the real fixtures in
 `data/evaluation_cases.jsonl`).
 
 ```bash
 npm run test:engine
-# ✅ unstick engine · 324/324 passed · 0 failed
+# ✅ unstick engine · 300/300 passed · 0 failed
 ```
 
-The fixtures cover multilingual tasks, compound tasks, entity preservation
+The fixtures cover compound tasks, entity preservation
 ("John's", "José"), scope strength, ambiguity thresholds, ladder
 coherence, and banned-phrase rejection.
 
