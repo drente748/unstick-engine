@@ -35,6 +35,9 @@ const TEMPORAL_WORDS = new Set([
 /** Temporal markers that START a time phrase ("before Friday"). */
 const TIME_MARKERS = new Set(["before", "by", "until", "on"]);
 
+/** Temporal modifiers that fuse with the following day ("next Tuesday"). */
+const TEMPORAL_MODIFIERS = new Set(["next", "this", "coming", "last", "every"]);
+
 /** Capitalized word(s) at a position — likely a proper name. */
 function isProperName(word: string): boolean {
   return /^[A-Z][a-z]+$/.test(word);
@@ -121,6 +124,22 @@ export function extractEntities(clauseText: string): TaskEntity[] {
   let timeBoundary = words.length; /* index where the time phrase starts */
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
+    /* modifier + day fusion FIRST: "next Tuesday" is ONE time entity */
+    if (TEMPORAL_MODIFIERS.has(w)) {
+      const nxt = words[i + 1] ?? "";
+      if (TEMPORAL_WORDS.has(nxt)) {
+        push({
+          role: "time",
+          text: `${capitalize(w)} ${capitalize(nxt)}`,
+          key: `${w} ${nxt}`,
+          confidence: 0.9,
+          evidence: `temporal-modifier:${w}`,
+        });
+        timeBoundary = Math.min(timeBoundary, i);
+        break;
+      }
+      continue; /* bare "next" with no day — not a time phrase */
+    }
     const isMarker = TIME_MARKERS.has(w);
     const isTemporal = TEMPORAL_WORDS.has(w);
     if (!isMarker && !isTemporal) continue;
