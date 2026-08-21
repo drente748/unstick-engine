@@ -137,7 +137,6 @@ export interface ParsedIntent {
   raw: string;
   /** Normalized display title. */
   title: string;
-  locale: string;
   action: {
     verb: string | null;
     phrase: string | null;
@@ -242,8 +241,6 @@ export interface TaskAnalysis {
   structureEvidence: string[];
   /** Per-inference confidence values (0..1). */
   analysisConfidence: AnalysisConfidence;
-  /** Detected script/locale hint ("en", "ar", …). */
-  locale: string;
   /** Analysis rules version that produced this object. */
   analysisVersion: string;
 }

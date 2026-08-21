@@ -478,9 +478,6 @@ export function runEngineTests(): TestResults {
 
     const u = analyzeTask("Reply to José's email");
     ok(/José/i.test(u.object), "entity/accented-kept", u.object);
-
-    const ar = analyzeTask("رد على رسالة أحمد");
-    ok(ar.object.includes("أحمد"), "entity/arabic-kept", ar.object);
   }
 
   /* ---------- T-F · multi-level semantic dedupe (TEST F) ---------- */
@@ -541,38 +538,6 @@ export function runEngineTests(): TestResults {
     for (const [field, good] of checks) ok(good, `recovery/preserves-${field}`, String(rec[field as keyof typeof rec]));
   }
 
-  /* ---------- T-L · Arabic end-to-end (§24) ---------- */
-  {
-    const ar1 = analyzeTask("نظف الشقة كلها");
-    ok(ar1.locale === "ar", "arabic/locale", ar1.locale);
-    ok(ar1.structure === "cleaning", "arabic/structure", ar1.structure);
-    ok(ar1.medium === "physical", "arabic/medium", ar1.medium);
-    ok(ar1.scopeStrength >= 2, "arabic/scope", String(ar1.scopeStrength));
-    const plan = planFirstStep(ar1, {});
-    ok(validLevel(plan.size) && plan.action.trim().length > 0, "arabic/plan", plan.action);
-    const ladder = previewSteps({ ...freshDraft("نظف الشقة كلها"), level: plan.size }, null, 4);
-    const intents = ladder.map((r) => intentKey(r.action));
-    ok(new Set(intents).size === ladder.length, "arabic/ladder-distinct", ladder.map((r) => r.action).join(" || "));
-    ladder.forEach((r) => emit(r.action, r.size));
-
-    const ar2 = analyzeTask("رد على رسالة أحمد");
-    ok(ar2.structure === "communication", "arabic/communication", ar2.structure);
-    ok(ar2.medium === "digital", "arabic/digital", ar2.medium);
-    const p2 = planFirstStep(ar2, {});
-    ok(leaks(p2.action, BANNED_FOR_DIGITAL).length === 0, "arabic/no-physical-leak", p2.action);
-    emit(p2.action, p2.size);
-
-    /* waw inside a word is NOT a separator — no phantom multi-part */
-    const ar3 = analyzeTask("ذاكر الوحدة الثالثة");
-    ok(ar3.parts.length === 0, "arabic/waw-midword-no-split", JSON.stringify(ar3.parts));
-    ok(ar3.actionCount === 0, "arabic/waw-midword-no-conjunction", String(ar3.actionCount));
-
-    /* conjunctive waw starting a word IS a separator */
-    const ar4 = analyzeTask("نظف المطبخ وغسل الصحون");
-    ok(ar4.parts.length >= 2, "arabic/waw-conjunctive-splits", JSON.stringify(ar4.parts));
-    ok(ar4.actionCount >= 1, "arabic/waw-conjunctive-counted", String(ar4.actionCount));
-  }
-
   /* ---------- T-M · analysis contract fields (§9) ---------- */
   {
     const a = analyzeTask("Build my website");
@@ -580,7 +545,6 @@ export function runEngineTests(): TestResults {
     const c = a.analysisConfidence;
     const inRange = [c.structure, c.medium, c.verb, c.object, c.barrier].every((v) => v >= 0 && v <= 1);
     ok(inRange, "contract/confidence-range", JSON.stringify(c));
-    ok(typeof a.locale === "string" && a.locale.length > 0, "contract/locale", a.locale);
     ok(typeof a.analysisVersion === "string" && a.analysisVersion.length > 0, "contract/analysisVersion", a.analysisVersion);
     const plan = planFirstStep(a, {});
     const log = getDecisionLog();
@@ -609,10 +573,6 @@ export function runEngineTests(): TestResults {
     /* a recipient flips “write an email” from writing to communication */
     const c = analyzeTask("write an email to Sarah");
     ok(c.structure === "communication", "parse/recipient-shifts-to-comm", c.structure);
-
-    const d = analyzeTask("رد على رسالة أحمد عن الفاتورة");
-    ok(d.recipient === "أحمد", "parse/arabic-recipient", d.recipient ?? "null");
-    ok((d.topic ?? "").includes("الفاتورة"), "parse/arabic-topic", d.topic ?? "null");
 
     const e = analyzeTask("don't skip the gym today");
     ok(e.negated === true, "parse/negation", String(e.negated));

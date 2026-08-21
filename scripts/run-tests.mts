@@ -54,9 +54,6 @@ function runEvalCases(): { pass: number; failures: Array<{ test: string; detail:
     if (typeof expect.structure === "string") {
       ok(a.structure === expect.structure, `eval/${c.id}/structure`, `want ${expect.structure}, got ${a.structure}`);
     }
-    if (typeof expect.locale === "string") {
-      ok(a.locale === expect.locale, `eval/${c.id}/locale`, `want ${expect.locale}, got ${a.locale}`);
-    }
     if (typeof expect.scopeStrengthMin === "number") {
       ok(a.scopeStrength >= (expect.scopeStrengthMin as number), `eval/${c.id}/scopeStrength`, String(a.scopeStrength));
     }

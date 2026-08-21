@@ -59,7 +59,6 @@ That's it. Open the URL and start typing a task.
 | ---- | ---------------------- |
 | Write a blog article about AI safety | Give yourself explicit permission to do the blog article AI safety badly for the next 90 seconds. |
 | Clean my entire apartment | Set a 25-second timer for the entire apartment. When it ends, you're allowed to stop. That's the win. |
-| أرسل رسالة إلى أحمد عن الموعد | Say out loud, to the room: "I'm starting now." |
 | Fix the bug in the checkout flow | Do the part of the bug a distracted version of you could still do. Just that. |
 
 ## Architecture at a glance
@@ -117,7 +116,7 @@ npm run test:engine
 ```
 
 The fixtures cover multilingual tasks, compound tasks, entity preservation
-("John's", "أحمد", "José"), scope strength, ambiguity thresholds, ladder
+("John's", "José"), scope strength, ambiguity thresholds, ladder
 coherence, and banned-phrase rejection.
 
 ## Local-first & privacy

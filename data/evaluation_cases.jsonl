@@ -8,8 +8,6 @@
 {"id":"large-scope","task":"clean my entire apartment","expect":{"scopeStrengthMin":2,"complexityMin":2,"mustStayAbout":["clean","clear","pick","tidy","surface","item","object","one","apartment","version","touch","thing","connected"],"rejectContains":["glass of water","open your laptop","open your email"]}}
 {"id":"large-scope-inbox","task":"get through my whole inbox backlog","expect":{"scopeStrengthMin":2,"rejectContains":["stand up and take one step"]}}
 {"id":"negative-irrelevant","task":"Reply to John's email","evaluation":"candidate-pool","rejectEverywhere":["get a glass of water","stare at","do something","take action","be more disciplined"]}
-{"id":"arabic-cleaning","task":"نظف الشقة كلها","expect":{"locale":"ar","structure":"cleaning","medium":"physical","scopeStrengthMin":2}}
-{"id":"arabic-digital","task":"رد على رسالة أحمد","expect":{"locale":"ar","structure":"communication","medium":"digital","entityPreserved":"أحمد","rejectContains":["stand up","walk to"]}}
 {"id":"named-person","task":"email Sarah about the invoice","expect":{"person":"sarah","medium":"digital","entityPreserved":"Sarah"}}
 {"id":"named-tool","task":"update the budget in excel","expect":{"tool":"excel","medium":"digital","rejectContains":["stand up and walk"]}}
 {"id":"named-location","task":"tidy the garage","expect":{"place":"garage","medium":"physical"}}
@@ -20,4 +18,4 @@
 {"id":"recovery-fields","evaluation":"recovery","task":"do my taxes","why":"stuck","requireFields":["override","level","strategy","memory","note","decision","feedbacks","lastFeedback"]}
 {"id":"hysteresis","evaluation":"hysteresis","task":"clean my entire apartment","expect":{"oneWinHolds":true,"twoWinsShrink":true,"failureShrinksNow":true}}
 {"id":"remote-invalid","evaluation":"remote","task":"Reply to John's email","ladder":["Get a glass of water.","Stand up and take one step toward where the email happens.","Open your laptop and stretch.","Open the email from John.","Open the email from John."],"expectKept":1}
-{"id":"undefined-level-regression","evaluation":"levels","tasks":["Reply to John's email","clean my entire apartment","write a complete blog article","deal with that thing somehow","نظف الشقة كلها"],"expectAllLevelsIn": [0,4]}
+{"id":"undefined-level-regression","evaluation":"levels","tasks":["Reply to John's email","clean my entire apartment","write a complete blog article","deal with that thing somehow","organize the garage and sell stuff online"],"expectAllLevelsIn": [0,4]}

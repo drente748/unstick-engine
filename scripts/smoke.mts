@@ -20,11 +20,6 @@ const TASKS = [
   // English — vague / mental
   "Deal with that thing somehow",
   "Be more productive",
-  // Arabic — digital
-  "أرسل رسالة إلى أحمد عن الموعد",
-  "أكتب تقرير عن المشروع",
-  // Arabic — physical
-  "نظف غرفتي",
   // Edge cases
   "Reply to John's email" + " and then",
   "Fix my code and also walk the dog",
@@ -38,7 +33,7 @@ function banner(t: string) {
 function runOne(task: string) {
   banner(task);
   const a = analyzeTask(task);
-  console.log(`  [analysis] medium=${a.medium} structure=${a.structure} locale=${a.locale} parts=${a.parts.length} complexity=${a.complexity} ambiguity=${a.ambiguity}`);
+  console.log(`  [analysis] medium=${a.medium} structure=${a.structure} parts=${a.parts.length} complexity=${a.complexity} ambiguity=${a.ambiguity}`);
   let d: any = freshDraft(task);
   const plan = planFirstStep(a, {});
   console.log(`  [first step | ${plan.strategy} size=${plan.size}] ${plan.action}`);

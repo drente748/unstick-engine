@@ -49,10 +49,6 @@ const VERBS: Record<string, string> = {
   exercise: "exercising", workout: "a workout", run: "a run", stretch: "a stretch",
   message: "a message", contact: "a message", answer: "an answer", send: "sending",
   sell: "a listing", list: "a listing", move: "moving", deliver: "delivering",
-  /* Arabic base verbs — matched after tokenization */
-  "نظف": "cleaning", "رتب": "tidying", "اكتب": "writing", "رد": "a reply",
-  "ذاكر": "studying", "ادرس": "studying", "اتصل": "a call", "اشتر": "shopping",
-  "صلح": "a fix", "جهز": "preparing", "نظم": "organizing", "ابحث": "research",
 };
 
 const STOPWORDS = new Set([
@@ -61,16 +57,13 @@ const STOPWORDS = new Set([
   "that", "this", "it", "its", "is", "are", "be", "do", "does", "need", "have", "has", "will",
   "should", "can", "must", "really", "finally", "just", "also", "again", "today", "now", "soon",
   "asap", "please", "i", "we", "you", "he", "she", "they", "there", "here", "all", "everything",
-  /* Arabic function words — dropped for matching, never for display */
-  "على", "إلى", "الى", "من", "في", "عن", "مع", "أن", "ان", "هذا", "هذه", "ذلك", "تلك",
-  "التي", "الذي", "يا", "ثم", "أو", "قد", "لقد",
+  /* function words — dropped for matching, never for display */
 ]);
 
 const PLACES = [
   "kitchen", "desk", "room", "bedroom", "bathroom", "office", "garage", "gym", "store", "bank",
   "library", "car", "floor", "studio", "lab", "basement", "attic", "balcony", "yard", "garden",
   "classroom", "campus", "clinic", "salon", "laundromat", "post office", "pharmacy", "shop",
-  "مطبخ", "مكتب", "غرفة", "حمام", "شرفة", "مرآب",
 ];
 
 const TOOLS = [
@@ -79,7 +72,6 @@ const TOOLS = [
   "spreadsheet", "slides", "canvas", "figma", "vscode", "editor", "terminal", "calendar",
   "portal", "account", "dashboard", "notebook", "textbook", "notes", "camera", "guitar",
   "piano", "sketchbook", "repo", "codebase", "printer", "sewing machine", "banking",
-  "تطبيق", "ايميل", "إيميل", "بريد", "واتساب",
 ];
 
 const PEOPLE = [
@@ -89,39 +81,38 @@ const PEOPLE = [
   "brother", "partner", "wife", "husband", "kids", "customer", "customers", "advisor",
 ];
 
-const PROJECT_WORDS = ["project", "website", "web site", "app", "business", "startup", "portfolio", "thesis", "renovation", "launch", "campaign", "channel", "مشروع", "موقع"];
+const PROJECT_WORDS = ["project", "website", "web site", "app", "business", "startup", "portfolio", "thesis", "renovation", "launch", "campaign", "channel"];
 
-const VAGUE_WORDS = ["stuff", "things", "thing", "everything", "my life", "somehow", "somewhere", "whatever", "it all", "حاجة", "شيء ما", "الحاجة"];
-const DEADLINE_WORDS = ["today", "tonight", "tomorrow", "deadline", "due", "asap", "urgent", "this week", "friday", "monday", "sunday", "morning", "evening", "اليوم", "غدا", "غدًا"];
-const URGENT_WORDS = ["today", "tonight", "asap", "urgent", "due", "اليوم", "الآن"];
+const VAGUE_WORDS = ["stuff", "things", "thing", "everything", "my life", "somehow", "somewhere", "whatever", "it all"];
+const DEADLINE_WORDS = ["today", "tonight", "tomorrow", "deadline", "due", "asap", "urgent", "this week", "friday", "monday", "sunday", "morning", "evening"];
+const URGENT_WORDS = ["today", "tonight", "asap", "urgent", "due"];
 /** Strong scope words — these MUST materially raise complexity/scope. */
 export const STRONG_SCOPE_WORDS = [
   "entire", "whole", "all of", "everything", "from scratch", "complete", "completely",
   "whole house", "apartment", "house", "backlog", "inbox",
-  "كل", "كلها", "الشقة كلها", "البيت كله", "جميع",
 ];
-const SCOPE_WORDS = ["entire", "whole", "all", "every", "complete", "everything", "apartment", "house", "backlog", "inbox", "كل", "جميع"];
-const PHYSICAL_WORDS = ["clean", "tidy", "walk", "run", "gym", "laundry", "dishes", "pack", "move", "cook", "stretch", "exercise", "vacuum", "garden", "paint", "groceries", "store", "نظف", "رتب"];
-const DIGITAL_WORDS = ["email", "inbox", "doc", "document", "file", "website", "site", "app", "form", "code", "codebase", "repo", "spreadsheet", "excel", "notion", "slides", "portal", "account", "blog", "article", "text", "message", "slack", "online", "رسالة", "رسائل", "بريد", "ايميل", "إيميل", "موقع", "تطبيق", "واتساب", "مدونة"];
-const APP_WORDS = ["email", "inbox", "doc", "document", "file", "website", "site", "app", "form", "code", "codebase", "repo", "spreadsheet", "excel", "notion", "slides", "portal", "account", "calendar", "banking", "browser", "editor", "vscode", "تطبيق", "ايميل", "إيميل", "بريد"];
-const STAKE_WORDS = ["exam", "test", "interview", "boss", "client", "taxes", "tax", "deadline", "due", "urgent", "important", "presentation", "thesis", "visa", "contract", "rent", "امتحان", "مهم"];
+const SCOPE_WORDS = ["entire", "whole", "all", "every", "complete", "everything", "apartment", "house", "backlog", "inbox"];
+const PHYSICAL_WORDS = ["clean", "tidy", "walk", "run", "gym", "laundry", "dishes", "pack", "move", "cook", "stretch", "exercise", "vacuum", "garden", "paint", "groceries", "store"];
+const DIGITAL_WORDS = ["email", "inbox", "doc", "document", "file", "website", "site", "app", "form", "code", "codebase", "repo", "spreadsheet", "excel", "notion", "slides", "portal", "account", "blog", "article", "text", "message", "slack", "online"];
+const APP_WORDS = ["email", "inbox", "doc", "document", "file", "website", "site", "app", "form", "code", "codebase", "repo", "spreadsheet", "excel", "notion", "slides", "portal", "account", "calendar", "banking", "browser", "editor", "vscode"];
+const STAKE_WORDS = ["exam", "test", "interview", "boss", "client", "taxes", "tax", "deadline", "due", "urgent", "important", "presentation", "thesis", "visa", "contract", "rent"];
 const FIRSTSTEP_WORDS = ["open", "call", "email", "text", "walk", "stand", "sit", "grab", "put on", "pick up", "find", "check"];
 
 /* Communication verbs — the heart of recipient/topic parsing. */
 const COMM_VERBS = new Set([
   "reply", "respond", "answer", "email", "text", "message", "call", "contact", "send", "write",
-  "ring", "dm", "whatsapp", "ping", "رد", "اتصل", "راسل", "ابعت", "أرسل",
+  "ring", "dm", "whatsapp", "ping",
 ]);
 const MESSAGE_NOUNS = new Set([
-  "email", "message", "letter", "text", "dm", "note", "mail", "رسالة", "بريد", "ايميل", "إيميل", "واتساب",
+  "email", "message", "letter", "text", "dm", "note", "mail",
 ]);
-const TOPIC_MARKERS = ["about", "regarding", "concerning", "re:", "عن", "بخصوص", "حول"];
-const CONDITIONAL_WORDS = ["before", "after", "once", "when", "until", "wait", "waiting", "قبل", "بعد", "لما", "عندما", "حتى"];
-const NEGATION_STARTS = ["don't", "dont", "do not", "never", "stop", "quit", "avoid", "no more", "لا", "توقف", "تجنب", "كف عن"];
-const SCREEN_VERBS = new Set(["email", "reply", "respond", "text", "message", "code", "debug", "send", "dm", "رد", "راسل"]);
+const TOPIC_MARKERS = ["about", "regarding", "concerning", "re:"];
+const CONDITIONAL_WORDS = ["before", "after", "once", "when", "until", "wait", "waiting"];
+const NEGATION_STARTS = ["don't", "dont", "do not", "never", "stop", "quit", "avoid", "no more"];
+const SCREEN_VERBS = new Set(["email", "reply", "respond", "text", "message", "code", "debug", "send", "dm"]);
 /* verbs that LOOK physical but are digital/mental when an artifact is present */
-const DIGITAL_FIX_VERBS = new Set(["fix", "debug", "repair", "صلح"]);
-const BODY_VERBS = new Set(["clean", "tidy", "declutter", "pack", "cook", "walk", "run", "stretch", "exercise", "paint", "wash", "نظف", "رتب"]);
+const DIGITAL_FIX_VERBS = new Set(["fix", "debug", "repair"]);
+const BODY_VERBS = new Set(["clean", "tidy", "declutter", "pack", "cook", "walk", "run", "stretch", "exercise", "paint", "wash"]);
 
 /* ---------------- stage 1: normalize + tokenize ---------------- */
 
@@ -186,9 +177,9 @@ function findVerb(chunks: Chunk[]): { base: string; phrase: string; index: numbe
 
 /**
  * WHO is this directed at? Parses "reply to John's email",
- * "email Sarah about the invoice", "رد على رسالة أحمد" — always
- * returning the ORIGINAL casing/script. Stops before artifacts
- * ("John's EMAIL" → recipient is John) and before topic markers.
+ * "email Sarah about the invoice" — always returning the ORIGINAL
+ * casing. Stops before artifacts ("John's EMAIL" → recipient is
+ * John) and before topic markers.
  */
 function findRecipient(chunks: Chunk[], verb: { base: string; index: number } | null): string | null {
   if (!verb || !COMM_VERBS.has(verb.base)) return null;
@@ -198,7 +189,7 @@ function findRecipient(chunks: Chunk[], verb: { base: string; index: number } | 
     const lead = c.toks[0];
     if (!lead) continue;
     if (TOPIC_MARKERS.includes(lead)) break;
-    if (["to", "back", "on", "على", "إلى", "الى"].includes(lead)) continue;
+    if (["to", "back", "on"].includes(lead)) continue;
     if (MESSAGE_NOUNS.has(lead) || TOOLS.includes(lead)) continue;
     if (!c.content) continue;
     parts.push(c.text);
@@ -210,7 +201,7 @@ function findRecipient(chunks: Chunk[], verb: { base: string; index: number } | 
   return parts.join(" ");
 }
 
-/** WHAT is it about? "…about the invoice", "…عن الفاتورة". */
+/** WHAT is it about? "…about the invoice". */
 function findTopic(chunks: Chunk[]): string | null {
   for (let i = 0; i < chunks.length; i++) {
     const lead = chunks[i].toks[0];
@@ -243,7 +234,6 @@ export function parseTask(rawTitle: string): ParsedIntent {
   const chunks = chunkOf(title);
   const toks = chunks.flatMap((c) => c.toks);
   const lower = title.toLowerCase();
-  const locale = /[\u0600-\u06FF]/.test(title) ? "ar" : "en";
 
   const v = findVerb(chunks);
   const recipient = findRecipient(chunks, v);
@@ -254,10 +244,7 @@ export function parseTask(rawTitle: string): ParsedIntent {
   const scopeWord = SCOPE_WORDS.find((b) => lower.includes(b)) ?? null;
   const scopeStrong = scopeWord ? STRONG_SCOPE_WORDS.some((s) => lower.includes(s)) : false;
 
-  /* conjunctions: explicit separators + Arabic conjunctive waw that
-     STARTS a word ("وغسل") — mid-word waw (الموعد) is not a separator */
-  const wawConjunctions = (title.match(/(?<=[\s\p{N}])و(?=\S)|^و(?=\S)/gu) ?? []).length;
-  const conjunctions = (lower.match(/\band\b|,|;|؛/g) ?? []).length + wawConjunctions;
+  const conjunctions = (lower.match(/\band\b|,|;/g) ?? []).length;
   const negated = NEGATION_STARTS.some((n) => lower.startsWith(n));
   const conditionals = CONDITIONAL_WORDS.filter((c) => toks.includes(c) || lower.includes(c)).length;
   const deadlineValue = DEADLINE_WORDS.find((d) => lower.includes(d)) ?? null;
@@ -276,7 +263,6 @@ export function parseTask(rawTitle: string): ParsedIntent {
   return {
     raw: rawTitle,
     title,
-    locale,
     action: {
       verb: v?.base ?? null,
       phrase: v?.phrase ?? null,
@@ -328,21 +314,21 @@ const objHas = (p: ParsedIntent, ...words: string[]): boolean =>
  */
 const STRUCTURE_FEATURES: Record<Structure, Feature[]> = {
   writing: [
-    { test: (p) => verbIs(p, "write", "draft", "compose", "اكتب"), w: 3, why: "verb:write" },
-    { test: (p) => objHas(p, "essay", "article", "blog", "post", "paper", "report", "thesis", "letter", "caption", "novel", "story", "script", "summary", "مقال", "مقالة", "تقرير", "مدونة"), w: 2, why: "object:writable" },
+    { test: (p) => verbIs(p, "write", "draft", "compose"), w: 3, why: "verb:write" },
+    { test: (p) => objHas(p, "essay", "article", "blog", "post", "paper", "report", "thesis", "letter", "caption", "novel", "story", "script", "summary"), w: 2, why: "object:writable" },
   ],
   communication: [
-    { test: (p) => verbIs(p, "reply", "respond", "email", "text", "message", "call", "contact", "send", "answer", "رد", "اتصل", "راسل", "ابعت"), w: 3, why: "verb:communicate" },
-    { test: (p) => objHas(p, "email", "emails", "inbox", "message", "messages", "replies", "slack", "dm", "رسالة", "رسائل", "بريد", "واتساب"), w: 2, why: "object:channel" },
+    { test: (p) => verbIs(p, "reply", "respond", "email", "text", "message", "call", "contact", "send", "answer"), w: 3, why: "verb:communicate" },
+    { test: (p) => objHas(p, "email", "emails", "inbox", "message", "messages", "replies", "slack", "dm"), w: 2, why: "object:channel" },
     { test: (p) => p.recipient != null, w: 1.5, why: "recipient:present" },
     { test: (p) => /reach out|follow up|followup|get back to/.test(p.title.toLowerCase()), w: 2, why: "phrase:follow-up" },
   ],
   cleaning: [
-    { test: (p) => verbIs(p, "clean", "tidy", "declutter", "wash", "scrub", "sweep", "mop", "dust", "vacuum", "نظف", "رتب"), w: 3, why: "verb:clean" },
-    { test: (p) => objHas(p, "laundry", "dishes", "mess", "trash", "room", "apartment", "house", "kitchen", "أطباق", "صحون", "شقة", "غسيل"), w: 2, why: "object:cleanable" },
+    { test: (p) => verbIs(p, "clean", "tidy", "declutter", "wash", "scrub", "sweep", "mop", "dust", "vacuum"), w: 3, why: "verb:clean" },
+    { test: (p) => objHas(p, "laundry", "dishes", "mess", "trash", "room", "apartment", "house", "kitchen"), w: 2, why: "object:cleanable" },
   ],
   research: [
-    { test: (p) => verbIs(p, "research", "compare", "investigate", "analyze", "analyse", "ابحث"), w: 3, why: "verb:research" },
+    { test: (p) => verbIs(p, "research", "compare", "investigate", "analyze", "analyse"), w: 3, why: "verb:research" },
     { test: (p) => /look into|find out|read up|which .* best/.test(p.title.toLowerCase()), w: 2.5, why: "phrase:inquiry" },
     { test: (p) => objHas(p, "options", "survey", "quotes"), w: 1.5, why: "object:comparison" },
   ],
@@ -351,32 +337,32 @@ const STRUCTURE_FEATURES: Record<Structure, Feature[]> = {
     { test: (p) => hasTok(p, "whether", "decision", "choice") || /commit to|cancel or/.test(p.title.toLowerCase()), w: 2, why: "token:choice" },
   ],
   learning: [
-    { test: (p) => verbIs(p, "study", "revise", "learn", "ذاكر", "ادرس"), w: 3, why: "verb:study" },
-    { test: (p) => objHas(p, "exam", "test", "homework", "course", "lecture", "flashcards", "textbook", "chapter", "امتحان", "اختبار", "مراجعة", "درس"), w: 2, why: "object:study-material" },
+    { test: (p) => verbIs(p, "study", "revise", "learn"), w: 3, why: "verb:study" },
+    { test: (p) => objHas(p, "exam", "test", "homework", "course", "lecture", "flashcards", "textbook", "chapter"), w: 2, why: "object:study-material" },
   ],
   creating: [
     { test: (p) => verbIs(p, "draw", "paint", "design", "sketch", "compose", "sew", "knit", "bake", "craft", "film"), w: 3, why: "verb:create" },
     { test: (p) => objHas(p, "song", "music", "video", "photo", "logo", "poster", "shelf"), w: 2, why: "object:artifact" },
   ],
   errand: [
-    { test: (p) => verbIs(p, "buy", "order", "renew", "book", "schedule", "reserve", "cancel", "deliver", "اشتر"), w: 2.5, why: "verb:errand" },
-    { test: (p) => objHas(p, "groceries", "grocery", "pharmacy", "store", "bank", "post", "mail", "appointment", "taxes", "tax", "invoice", "bill", "form", "application", "بقالة", "موعد", "فاتورة"), w: 2, why: "object:admin-or-purchase" },
+    { test: (p) => verbIs(p, "buy", "order", "renew", "book", "schedule", "reserve", "cancel", "deliver"), w: 2.5, why: "verb:errand" },
+    { test: (p) => objHas(p, "groceries", "grocery", "pharmacy", "store", "bank", "post", "mail", "appointment", "taxes", "tax", "invoice", "bill", "form", "application"), w: 2, why: "object:admin-or-purchase" },
   ],
   fixing: [
-    { test: (p) => verbIs(p, "fix", "repair", "debug", "mend", "troubleshoot", "صلح"), w: 3, why: "verb:fix" },
-    { test: (p) => objHas(p, "bug", "error", "leak", "crack", "عطل", "مكسور") || /not working|broken/.test(p.title.toLowerCase()), w: 2, why: "object:defect" },
+    { test: (p) => verbIs(p, "fix", "repair", "debug", "mend", "troubleshoot"), w: 3, why: "verb:fix" },
+    { test: (p) => objHas(p, "bug", "error", "leak", "crack") || /not working|broken/.test(p.title.toLowerCase()), w: 2, why: "object:defect" },
   ],
   organizing: [
-    { test: (p) => verbIs(p, "organize", "organise", "sort", "file", "arrange", "catalog", "archive", "نظم"), w: 3, why: "verb:organize" },
-    { test: (p) => objHas(p, "folders", "documents", "paperwork", "inventory", "drawers", "closet", "files", "ملفات", "أوراق"), w: 2, why: "object:collection" },
+    { test: (p) => verbIs(p, "organize", "organise", "sort", "file", "arrange", "catalog", "archive"), w: 3, why: "verb:organize" },
+    { test: (p) => objHas(p, "folders", "documents", "paperwork", "inventory", "drawers", "closet", "files"), w: 2, why: "object:collection" },
   ],
   prep: [
-    { test: (p) => verbIs(p, "prepare", "prep", "pack", "جهز"), w: 2.5, why: "verb:prepare" },
+    { test: (p) => verbIs(p, "prepare", "prep", "pack"), w: 2.5, why: "verb:prepare" },
     { test: (p) => /set up|setup|get ready|plan for/.test(p.title.toLowerCase()), w: 2.5, why: "phrase:setup" },
   ],
   project: [
     { test: (p) => verbIs(p, "build", "develop", "code", "launch"), w: 2, why: "verb:build" },
-    { test: (p) => objHas(p, "website", "app", "business", "startup", "portfolio", "renovation", "launch", "campaign", "channel", "مشروع", "موقع") || hasTok(p, "project"), w: 2.5, why: "object:endeavor" },
+    { test: (p) => objHas(p, "website", "app", "business", "startup", "portfolio", "renovation", "launch", "campaign", "channel") || hasTok(p, "project"), w: 2.5, why: "object:endeavor" },
   ],
   generic: [],
 };
@@ -464,7 +450,7 @@ function extractObject(title: string, verb: string | null): string {
   const phrase = kept.join(" ");
   const first = kept[0];
   const firstLower = first.toLowerCase();
-  const hasDeterminer = /^(the|my|our|your|a|an|his|her|their|this|that|these|those)\b/.test(firstLower) || /^(ال|هذا|هذه|تلك)/.test(first);
+  const hasDeterminer = /^(the|my|our|your|a|an|his|her|their|this|that|these|those)\b/.test(firstLower);
   const possessiveOrProper = /'s$/i.test(firstLower) || /^[A-Z][\p{L}']*$/u.test(first);
   const latin = /^[a-z]/i.test(first);
   if (hasDeterminer || possessiveOrProper || !latin) return phrase;
@@ -474,19 +460,16 @@ function extractObject(title: string, verb: string | null): string {
 /**
  * Split a multi-part task into its constituent moves, preserving the
  * user's original wording for each part. Splits on coordinating
- * conjunctions (and / , / ; / + — plus Arabic و) and on "then"/"after"
- * joins. Single-part tasks return []. The goal is NOT to plan the
- * whole task but to surface the FIRST move honestly, so the engine
- * never invents a starting point that wasn't in the user's words.
+ * conjunctions (and / , / ; / & / +) and on "then"/"after" joins.
+ * Single-part tasks return []. The goal is NOT to plan the whole
+ * task but to surface the FIRST move honestly, so the engine never
+ * invents a starting point that wasn't in the user's words.
  */
 function extractParts(title: string): string[] {
   const raw = title.trim();
   if (!raw) return [];
-  /* Arabic conjunction waw counts ONLY when it starts a word (وغسل =
-     "and wash"), never inside a word (الموعد, الوحدة) — splitting
-     mid-word fabricated phantom parts and a false "overwhelmed". */
   const segs = raw
-    .split(/\s*(?:,|;|،|\band\b|&|\+|\bthen\b|\bafter\b|(?<=[\s\p{N}])و(?=\S)|^و(?=\S))/iu)
+    .split(/\s*(?:,|;|\band\b|&|\+|\bthen\b|\bafter\b)/i)
     .map((s) => s.trim())
     .filter(Boolean);
   if (segs.length < 2) return [];
@@ -655,7 +638,6 @@ export function analyzeTask(rawTitle: string): TaskAnalysis {
     conditionals: p.conditionals,
     structureEvidence: cls.evidence,
     analysisConfidence,
-    locale: p.locale,
     analysisVersion: ANALYSIS_VERSION,
   };
 }
@@ -675,7 +657,6 @@ const TASK_SIDE: Barrier[] = ["unclear", "overwhelmed"];
 const AVOIDANCE_WORDS = [
   "avoid", "avoiding", "keep putting off", "putting off", "procrastinat", "dreading", "dread",
   "can't face", "cant face", "hate", "don't want to", "dont want to", "rather not", "skip",
-  "تجنب", "أؤجل", "أرجئ", "أتهرب", "أكره",
 ];
 /* wording that signals a real, visible first move already exists (→ not unclear) */
 const FIRST_MOVE_WORDS = ["open", "write", "call", "email", "text", "start", "do", "make", "send", "clean", "reply", "read", "fix"];
@@ -808,7 +789,6 @@ const VERB_SYNONYMS: Record<string, string> = {
 
 const INTENT_NOISE = new Set([
   "the", "a", "an", "my", "your", "our", "their", "his", "her",
-  "من", "على", "إلى", "في", "عن", "ال", "فقط", "الآن", "مرة",
   "just", "only", "now", "then", "right", "exactly", "single", "one", "first",
   "whole", "entire", "all", "any", "that", "this", "it", "its", "from", "into",
   "stop", "after", "before", "when", "if", "and", "or", "of", "for", "to", "in", "on", "at", "with",
