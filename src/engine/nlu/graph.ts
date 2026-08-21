@@ -9,10 +9,11 @@
    English-only, deterministic, evidence-backed.
    ============================================================ */
 
-import { analyzeTask, normalizeTask, PEOPLE, STOPWORDS, stem, tokenize, VERBS } from "../analysis";
+import { analyzeTask, normalizeTask, PEOPLE, PLACES, STOPWORDS, stem, tokenize, TOOLS, VERBS } from "../analysis";
 import { splitClauses } from "./clauses";
 import { extractEntities, TEMPORAL_WORDS, TEMPORAL_MODIFIERS } from "./entities";
 import { classifySubIntent, findVerbBase } from "./intent";
+import { DOCUMENTS } from "../reason/entityTypes";
 import type {
   RelationEdge,
   RelationKind,
@@ -49,6 +50,38 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
      a person, a temporal word, or a known verb (those mean the
      slice spans roles and is not a clean artifact phrase). ---- */
   let target: TaskEntity | null = entities.find((e) => e.role === "target") ?? null;
+
+  /* ---- KNOWN-THING SCAN: before trusting the raw v4 object slice,
+     look for a LEXICON-KNOWN artifact in the head clause itself
+     (documents / tools / places). A known thing beats any slice:
+     "get my passport renewed before my trip" -> passport, not
+     "before trip". Only words that are not verbs/people/temporal
+     qualify. ---- */
+  if (!target) {
+    const headWords = tokenize(head);
+    for (let i = 0; i < headWords.length; i++) {
+      const w = headWords[i];
+      if (STOPWORDS.has(w) || PEOPLE.includes(w)) continue;
+      if (TEMPORAL_WORDS.has(w) || TEMPORAL_MODIFIERS.has(w)) continue;
+      if (Object.prototype.hasOwnProperty.call(VERBS, w) || Object.prototype.hasOwnProperty.call(VERBS, stem(w))) continue;
+      const isKnown = DOCUMENTS.has(w) || TOOLS.includes(w) || PLACES.includes(w);
+      if (!isKnown) continue;
+      /* extend with a following known modifier ("history exam") */
+      let text = w;
+      if (i + 1 < headWords.length && DOCUMENTS.has(headWords[i + 1])) text = `${w} ${headWords[i + 1]}`;
+      entities.push({
+        id: `e${entities.length + 1}`,
+        role: "target",
+        text,
+        key: text,
+        confidence: 0.8,
+        evidence: "known-thing-scan",
+      });
+      target = entities[entities.length - 1];
+      break;
+    }
+  }
+
   if (!target && analysis.object && analysis.object.toLowerCase() !== title.toLowerCase() && clauses.length === 1) {
     const objWords = tokenize(analysis.object);
     /* TRIM instead of reject: cut the slice at the first polluting
@@ -130,9 +163,12 @@ export function buildTaskGraph(rawTitle: string): TaskGraph {
      driven ("reply to my boss about the project" -> "the project"),
      never a raw text slice. ---- */
   if (!target && entities.length > 0) {
-    const topicE = entities.find((e) => e.role === "topic" && e.entityType !== "unclassified");
-    const toolE = entities.find((e) => e.role === "tool");
-    const personE = entities.find((e) => e.role === "person");
+    /* never promote an entity whose text still carries sentence
+       punctuation — that is a corrupted slice, not a semantic object */
+    const clean = (e: TaskEntity) => !/[.!?,;:]$/.test(e.text.trim());
+    const topicE = entities.find((e) => e.role === "topic" && e.entityType !== "unclassified" && clean(e));
+    const toolE = entities.find((e) => e.role === "tool" && clean(e));
+    const personE = entities.find((e) => e.role === "person" && clean(e));
     if (topicE) {
       target = { ...topicE, role: "target", id: `e${entities.length + 1}`, confidence: 0.7, evidence: "semantic-recovery:topic" };
       entities.push(target);

@@ -922,6 +922,18 @@ export function runEngineTests(): TestResults {
         mustMatch: /project|message|boss|email/i,
         banned: [/but im nervous/i, /what say/i],
       },
+      /* punctuation-leak regression: "missing birthday." must never appear */
+      {
+        task: "Text my friend to apologize for missing their birthday.",
+        mustMatch: /message|friend|birthday/i,
+        banned: [/birthday\./i, /missing birthday/i],
+      },
+      /* word-boundary regression: "the ed before trip" must never appear */
+      {
+        task: "I need to get my passport renewed before my trip next month.",
+        mustMatch: /passport/i,
+        banned: [/\bed\b/i, /before trip/i],
+      },
     ];
     for (const c of AUDIT) {
       const r = generateFirstStep(c.task);

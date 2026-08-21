@@ -443,8 +443,11 @@ function extractObject(title: string, verb: string | null): string {
   const lower = title.toLowerCase();
   let start = 0;
   if (verb) {
-    const idx = lower.indexOf(verb);
-    if (idx >= 0) start = idx + verb.length;
+    /* WORD-BOUNDARY match, not substring: indexOf("renew") inside
+       "renewed" once left a dangling "ed" that became the object
+       ("the ed before trip"). \\b+\\w* jumps past the WHOLE word. */
+    const m = new RegExp(`\\b${verb}\\w*\\b`, "i").exec(lower);
+    if (m) start = m.index + m[0].length;
   }
   const rest = title.slice(start).trim().replace(/^[:\-–—\s]+/, "");
   const chunks = rest.split(/\s+/).filter(Boolean);

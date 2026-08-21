@@ -65,10 +65,18 @@ function isStartingBarrier(beliefs: Belief[]): boolean {
      ? displayEntity(g.recipient.text, g.recipient.evidence)
      : "them";
    /* no explicit target: communication intents imply a message
-      artifact ("email my boss" -> open the message), not "the task" */
+      artifact ("email my boss" -> open the message), not "the task".
+      A target RECOVERED from a topic role ("the project", "missing
+      birthday") is the SUBJECT of the message, not the artifact to
+      open — communication steps use "the message" instead. */
    const COMM = new Set(["reply", "initiate-contact", "follow-up", "cancel-plan", "negotiate"]);
-   const targetDisplay = g.primaryTarget?.text
-     ?? (COMM.has(g.subIntent) ? "the message" : "the task");
+   const tgt = g.primaryTarget;
+   const recoveredTopic = tgt != null && tgt.evidence.startsWith("semantic-recovery:topic");
+   const targetDisplay = tgt && !recoveredTopic
+     ? tgt.text
+     : COMM.has(g.subIntent)
+       ? "the message"
+       : (tgt?.text ?? "the task");
    return template
      .replace(/\{target\}/g, targetDisplay)
      .replace(/\{recipient\}/g, recipient)

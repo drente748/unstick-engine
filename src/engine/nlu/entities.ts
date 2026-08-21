@@ -196,11 +196,13 @@ export function extractEntities(clauseText: string): TaskEntity[] {
       if (i === 0) continue;
     }
     const topicWords: string[] = [];
-    const origTokens = title.split(/\s+/);
     for (let j = i + 1; j < words.length && j < timeBoundary && topicWords.length < 4; j++) {
       if (STOPWORDS.has(words[j])) continue;
       if (TIME_MARKERS.has(words[j]) || TEMPORAL_WORDS.has(words[j])) break;
-      topicWords.push(origTokens[j] ?? words[j]);
+      /* use the NORMALIZED token — indexing raw title by j drifts
+         when punctuation is glued to words ("birthday." kept its
+         period and leaked into the generated step) */
+      topicWords.push(words[j]);
     }
     if (topicWords.length > 0) {
       push({

@@ -108,6 +108,15 @@ export function checkEntityConsistency(c: CandidateV5, g: TaskGraph): Verdict {
   if (/\{(target|recipient|topic)\}/.test(c.action)) {
     return reject("entity-consistency", "unresolved role placeholder in output");
   }
+  /* PUNCTUATION LEAK: an entity whose text still carries sentence
+     punctuation ("missing birthday.") means a corrupted slice
+     reached the generator — reject, never emit. */
+  const usedEntities = [g.primaryTarget?.text, g.recipient?.text, g.topic?.text].filter(Boolean) as string[];
+  for (const e of usedEntities) {
+    if (/[.!?,;:]$/.test(e.trim()) || /\s{2}/.test(e)) {
+      return reject("entity-consistency", `corrupted entity text: "${e}"`);
+    }
+  }
   /* generic-pronoun drift: the step must not invent named entities.
      Only mid-sentence capitalized words count — sentence-initial
      words are imperative verbs ("Look at...", "Sort five..."). */

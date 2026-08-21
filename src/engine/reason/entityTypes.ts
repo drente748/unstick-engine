@@ -32,7 +32,7 @@ const COMM_ARTIFACTS = new Set([
 ]);
 
 /* ---- documents ---- */
-const DOCUMENTS = new Set([
+export const DOCUMENTS = new Set([
   "essay", "report", "form", "thesis", "application", "paper", "contract",
   "invoice", "bill", "proposal", "resume", "cv", "presentation", "slides",
   "spreadsheet", "budget",
