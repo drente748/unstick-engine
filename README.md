@@ -1,4 +1,4 @@
-# Unstick Engine
+# Unstick Engine (v1.0.0)
 
 > Offline, deterministic, local-first AI that breaks any task into the smallest
 > possible next move — no internet, no API key, no black box.
@@ -9,6 +9,31 @@ reasons through a deterministic pipeline to suggest a first step so small you
 can't reasonably refuse it.
 
 Built for the desk you're already staring at — runs locally, stays local.
+
+## What v1.0.0 does (final)
+
+```
+"I need to renew my passport, but I've been avoiding it and I don't know
+ where to start."
+    ↓  NLU: barrier clauses filtered, contractions can't become people
+    ↓  graph: target = passport <document>   intent = submit-form
+    ↓  beliefs: avoidance detected from "avoiding" + "don't know where"
+    ↓  generator + 7-gate validation cascade
+    →  "Put passport in front of you and read the first field only."
+```
+
+- **Understands real phrasing**: self-referential framings ("I can't…",
+  "I keep putting off…"), phrasal verbs ("back up my files"), compound
+  sentences with emotional tails, declared difficulty (easy/hard/impossible).
+- **One tiny step, never a plan dump** — every output passes a 7-gate
+  validation cascade that rejects parser artifacts, meta-coaching, corrupted
+  entities, and non-executable advice *before* it reaches you.
+- **A coaching agent that learns**: 22 evidence-based ADHD techniques
+  (sourced: Barkley, Volkow, NICE NG87, Dodson's PINCH model…), 5 personas,
+  4 intervention programs — belief revision from every feedback ("worked",
+  "too big", "stuck"), technique rotation, and voice calibration.
+- **395 assertions, 61 eval fixtures, deterministic output** — same input +
+  same history = same step, every time.
 
 ---
 
@@ -25,7 +50,7 @@ understand  →  generate  →  size  →  score  →  guardrails  →  dedupe
 
 - **No network calls by default.** Everything is rules + local state.
 - **Fully reproducible.** The same input and history always yield the same
-  first step — this is what makes it testable (300 assertions, 0 flaky tests).
+  first step — this is what makes it testable (395 assertions, 0 flaky tests).
 - An optional remote AI **decoration layer** exists, but every suggestion it
   makes is passed through the same guardrails as local output.
 
@@ -165,7 +190,7 @@ Use the hosted build at **https://drente748.github.io/unstick-engine/**
 │   ├── lib/persist.ts     ← localStorage helpers
 │   └── engine/            ← the whole brain (no UI imports):
 │       ├── analysis.ts    ← v4 parser + lexicons
-│       ├── localEngine.ts ← v4 engine + ALL test suites (392 assertions)
+│       ├── localEngine.ts ← v4 engine + ALL test suites (395 assertions)
 │       ├── nlu/           ← v5: clauses → entities → intent → TaskGraph
 │       ├── reason/        ← v5: entity natures, beliefs, archetypes, critic
 │       ├── compose/       ← v5: constrained step generator
@@ -188,7 +213,7 @@ Use the hosted build at **https://drente748.github.io/unstick-engine/**
 | `npm run dev` | Dev server at `http://localhost:3000` |
 | `npm run build` | Production build into `dist/` |
 | `npm run typecheck` | TypeScript, zero errors expected |
-| `npm run test:engine` | 392-assertion engine suite |
+| `npm run test:engine` | 395-assertion engine suite |
 | `npm run smoke` | Headless smoke: 11 tasks through the engine |
 
 ## Local-first & privacy
