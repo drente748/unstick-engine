@@ -58,6 +58,12 @@ export const VERBS: Record<string, string> = {
   fill: "filling", sign: "signing", clear: "clearing",
   go: "going", put: "putting", keep: "keeping",
   crash: "a crash",
+  water: "watering", assemble: "an assembly", refactor: "a refactor",
+  backup: "a backup", sync: "syncing",
+  upload: "uploading", download: "downloading", print: "printing", scan: "scanning",
+  register: "a registration", tighten: "tightening",
+  unpack: "unpacking", dry: "drying",
+  measure: "measuring", cut: "cutting", hang: "hanging",
 };
 
 /** Stopwords for matching only. Exported for the v5 NLU layer. */
@@ -446,7 +452,14 @@ function extractObject(title: string, verb: string | null): string {
     /* WORD-BOUNDARY match, not substring: indexOf("renew") inside
        "renewed" once left a dangling "ed" that became the object
        ("the ed before trip"). \\b+\\w* jumps past the WHOLE word. */
-    const m = new RegExp(`\\b${verb}\\w*\\b`, "i").exec(lower);
+    /* phrasal verbs were merged ("back up" -> backup): search for
+       the SPLIT pair in the text, not the merged token */
+    const split: Record<string, string> = {
+      backup: "back\\s+up", setup: "set\\s+up", pickup: "pick\\s+up",
+      dropoff: "drop\\s+off", followup: "follow\\s+up",
+    };
+    const pattern = split[verb] ?? `\\b${verb}\\w*\\b`;
+    const m = new RegExp(pattern, "i").exec(lower);
     if (m) start = m.index + m[0].length;
   }
   const rest = title.slice(start).trim().replace(/^[:\-–—\s]+/, "");

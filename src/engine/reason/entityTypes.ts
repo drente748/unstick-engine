@@ -64,6 +64,8 @@ const PROJECTS = new Set([
 const PHYSICAL_OBJECTS = new Set([
   "tools", "dishes", "laundry", "clothes", "boxes", "trash", "mess",
   "groceries", "stuff", "things", "equipment", "supplies", "car", "bike",
+  /* living things you CARE for — treated as physical objects of maintenance */
+  "plants", "plant", "garden", "lawn", "flowers", "pet", "pets", "aquarium",
 ]);
 
 /* ---- wearables ---- */

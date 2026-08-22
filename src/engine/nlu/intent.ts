@@ -18,8 +18,42 @@ import type { SubIntent, TaskEntity } from "../types-v5";
  * "I keep putting off cleaning the garage" -> clean, not keep. */
 const FRAMING_VERBS = new Set(["keep", "keeps", "kept", "putting", "avoid", "avoiding", "postpone", "postponing", "delay", "delaying"]);
 
+/** Phrasal verbs: two words that act as one task verb.
+ * Checked BEFORE single-word lookup ("back up my files" -> backup). */
+const PHRASAL_VERBS: Record<string, string> = {
+  "back up": "backup",
+  "set up": "setup",
+  "clean up": "clean",
+  "wash up": "wash",
+  "sign up": "register",
+  "follow up": "followup",
+  "pick up": "pickup",
+  "drop off": "dropoff",
+  "check out": "check",
+  "fill out": "fill",
+  "hand in": "submit",
+  "write up": "write",
+};
+
+/** Merge phrasal verbs into their single-token form so EVERY layer
+ * (verb finder, entity core, object extractor) sees one verb word.
+ * "Back up my laptop files" -> "backup my laptop files". */
+export function mergePhrasals(text: string): string {
+  let out = text;
+  for (const [pair, merged] of Object.entries(PHRASAL_VERBS)) {
+    out = out.replace(new RegExp(`\\b${pair}\\b`, "gi"), merged);
+  }
+  return out;
+}
+
 export function findVerbBase(clauseText: string): { base: string; index: number } | null {
   const words = tokenize(clauseText);
+  /* pass 0: phrasal verbs — two consecutive words mapping to one base */
+  for (let i = 0; i < words.length - 1; i++) {
+    const pair = `${words[i]} ${words[i + 1]}`;
+    const ph = PHRASAL_VERBS[pair];
+    if (ph) return { base: ph, index: i };
+  }
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
     let base = VERBS[w] ? w : null;
@@ -262,10 +296,20 @@ function fallbackFamily(verb: string): SubIntent {
     renew: "submit-form", book: "schedule-appointment", schedule: "schedule-appointment",
     cancel: "cancel-plan", order: "buy-item",
     fix: "fix-broken", repair: "fix-broken", debug: "fix-broken", crash: "fix-broken", troubleshoot: "fix-broken",
+    refactor: "build-project", backup: "fix-broken", setup: "configure-tool", sync: "fix-broken", install: "configure-tool",
+    followup: "follow-up", pickup: "tidy-space", dropoff: "buy-item",
+    water: "tidy-space", assemble: "build-project", pack: "file-organize",
+    print: "submit-form", scan: "submit-form", upload: "submit-form", download: "gather-options",
+    register: "submit-form", reserve: "schedule-appointment", tighten: "fix-broken",
+    unpack: "tidy-space", dry: "clean-space", measure: "design-artifact",
+    cut: "design-artifact", hang: "design-artifact",
     code: "build-project", build: "build-project", develop: "build-project",
     design: "design-artifact", draw: "design-artifact", paint: "design-artifact",
     organize: "file-organize", organise: "file-organize", sort: "file-organize",
     plan: "clarify-task", research: "gather-options", check: "gather-options",
+    prepare: "clarify-task", cook: "clarify-task", practice: "practice-skill",
+    review: "study-material", revise: "revise-existing", draft: "draft-new",
+    outline: "draft-new",
   };
   return map[verb] ?? "start-unknown";
 }

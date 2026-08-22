@@ -12,7 +12,7 @@
 import { analyzeTask, normalizeTask, PEOPLE, PLACES, STOPWORDS, stem, tokenize, TOOLS, VERBS } from "../analysis";
 import { splitClauses } from "./clauses";
 import { extractEntities, TEMPORAL_WORDS, TEMPORAL_MODIFIERS } from "./entities";
-import { classifySubIntent, findVerbBase } from "./intent";
+import { classifySubIntent, findVerbBase, mergePhrasals } from "./intent";
 import { DOCUMENTS } from "../reason/entityTypes";
 import type {
   RelationEdge,
@@ -28,7 +28,7 @@ import type {
  * multi-part planning (Phase 2 consumes them).
  */
 export function buildTaskGraph(rawTitle: string): TaskGraph {
-  const title = normalizeTask(rawTitle);
+  const title = mergePhrasals(normalizeTask(rawTitle));
   const analysis = analyzeTask(title);
 
   const clauses = splitClauses(title);

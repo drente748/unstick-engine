@@ -66,7 +66,7 @@ export function checkSemantic(c: CandidateV5, g: TaskGraph): Verdict {
     "reading-material": ["read", "skim", "open", "annotate"],
     "digital-system": ["open", "fix", "configure", "inspect"],
     "abstract-project": ["start", "plan", "advance", "survey", "open"],
-    "physical-object": ["pick-up", "move", "gather", "wash"],
+    "physical-object": ["pick-up", "move", "gather", "wash", "water", "tidy"],
     wearable: ["lay-out", "gather", "put-on"],
     "location-venue": ["go-to", "travel-to", "pack-for"],
     unclassified: ["open", "approach", "survey", "start", "plan", "ask", "move", "lay-out", "write"],

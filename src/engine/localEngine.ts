@@ -934,6 +934,22 @@ export function runEngineTests(): TestResults {
         mustMatch: /passport/i,
         banned: [/\bed\b/i, /before trip/i],
       },
+      /* phrasal-verb regressions: merged verb must not corrupt the object */
+      {
+        task: "Back up my laptop files to the hard drive",
+        mustMatch: /laptop|file|drive|backup/i,
+        banned: [/\bback\b/i, /what "back" actually/i],
+      },
+      {
+        task: "Water the plants on the balcony",
+        mustMatch: /plant/i,
+        banned: [/what "water" actually/i],
+      },
+      {
+        task: "Assemble the bookshelf from IKEA",
+        mustMatch: /bookshelf|shelf|piece/i,
+        banned: [/what "assemble" actually/i],
+      },
     ];
     for (const c of AUDIT) {
       const r = generateFirstStep(c.task);
